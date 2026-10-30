@@ -5,6 +5,8 @@ export interface Underlying {
   token: string;
   name: string;
   isIndex: boolean;
+  /** Set when this account cannot use the underlying (e.g. no BSE indices): the reason, shown as a tooltip. */
+  unavailable?: string;
 }
 
 export interface Expiry {
@@ -41,9 +43,14 @@ export interface ChainMeta {
   strikeStep: number;
 }
 
-export const QUICK_UNDERLYINGS: Underlying[] = [
+/**
+ * The quick-switch underlyings with built-in tokens: the mock market's, and the fallback when GetIndexList fails.
+ * With live data the tokens come from GetIndexList (`QuickUnderlyingsService`), so read that service, not this.
+ */
+export const QUICK_UNDERLYINGS: readonly Underlying[] = [
   { sym: 'NIFTY', exch: 'NSE', foExch: 'NFO', token: '26000', name: 'Nifty 50', isIndex: true },
-  // INTEGRATION: confirm BSE SENSEX index token and BFO chain lookup (TradeSmart's existing SENSEX chain)
+  // INTEGRATION: confirm the BFO chain lookup for SENSEX (TradeSmart's existing SENSEX chain); with live data the
+  // index token comes from GetIndexList('BSE'), '1' is only the placeholder fallback.
   { sym: 'SENSEX', exch: 'BSE', foExch: 'BFO', token: '1', name: 'BSE Sensex', isIndex: true },
 ];
 

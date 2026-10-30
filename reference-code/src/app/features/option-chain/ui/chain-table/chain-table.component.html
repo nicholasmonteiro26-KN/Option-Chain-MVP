@@ -51,7 +51,7 @@
               @for (c of row.ce; track c.id) {
                 <ng-container *ngTemplateOutlet="cellTpl; context: { $implicit: c, side: 'ce' }" />
               }
-              <td class="k">{{ row.strike }}</td>
+              <td class="k" [class.atm]="row.atm"><span class="chip">{{ row.strike }}</span></td>
               @for (c of row.pe; track c.id) {
                 <ng-container *ngTemplateOutlet="cellTpl; context: { $implicit: c, side: 'pe' }" />
               }
@@ -62,7 +62,7 @@
                 }
               </td>
             } @else {
-              <td class="k">{{ row.strike }}</td>
+              <td class="k" [class.atm]="row.atm"><span class="chip">{{ row.strike }}</span></td>
               @for (c of row.cells; track c.id) {
                 <ng-container *ngTemplateOutlet="cellTpl; context: { $implicit: c, side: '' }" />
               }

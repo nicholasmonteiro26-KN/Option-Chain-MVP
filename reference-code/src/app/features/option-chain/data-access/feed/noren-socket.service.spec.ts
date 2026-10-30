@@ -55,7 +55,7 @@ describe('NorenSocketService', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('sends the connect message on open and goes open on ck OK (any case)', async () => {
+  it('legacy session (susertoken): sends the t:"c" connect message on open and goes open on ck OK (any case)', async () => {
     const svc = make();
     expect(svc.status()).toBe('closed');
     const p = svc.connect();
@@ -67,6 +67,62 @@ describe('NorenSocketService', () => {
     last().receive({ t: 'ck', uid: 'U1', s: 'Ok' });
     await p;
     expect(svc.status()).toBe('open');
+  });
+
+  it('sends the session config source on connect when set (API logins use API)', async () => {
+    const svc = make({ source: 'API' });
+    const p = svc.connect();
+    last().open();
+    expect(last().sent[0]).toEqual({ t: 'c', uid: 'U1', actid: 'A1', source: 'API', susertoken: 'TOK' });
+    last().receive({ t: 'ck', uid: 'U1', s: 'Ok' });
+    await p;
+  });
+
+  // ---- v2 OAuth session (accessToken): t:"a" connect, t:"ak" ack ----
+
+  it('v2 session: sends {t:"a", uid, actid, source:"API", accesstoken} on open and goes open on ak OK (any case)', async () => {
+    const svc = make({ susertoken: undefined, accessToken: 'FAKE_ACCESS' });
+    const p = svc.connect();
+    last().open();
+    expect(last().sent[0]).toEqual({ t: 'a', uid: 'U1', actid: 'A1', source: 'API', accesstoken: 'FAKE_ACCESS' });
+    expect(last().sent[0]).not.toHaveProperty('susertoken');
+    expect(svc.status()).toBe('connecting');
+    last().receive({ t: 'ak', uid: 'U1', s: 'ok' });
+    await p;
+    expect(svc.status()).toBe('open');
+  });
+
+  it('v2 session: ak OK subscribes held keys and starts the 30 s heartbeat', async () => {
+    const svc = make({ susertoken: undefined, accessToken: 'FAKE_ACCESS' });
+    svc.subscribe(['NFO|1']);
+    const p = svc.connect();
+    last().open();
+    last().receive({ t: 'ak', s: 'OK' });
+    await p;
+    expect(last().tMsgs).toEqual([{ t: 't', k: 'NFO|1' }]);
+    vi.advanceTimersByTime(30_000);
+    expect(last().sent.filter((m) => m['t'] === 'h')).toHaveLength(1);
+  });
+
+  it('v2 session: ak Not_Ok goes session-expired, rejects connect and does not reconnect', async () => {
+    const svc = make({ susertoken: undefined, accessToken: 'FAKE_ACCESS' });
+    const p = svc.connect();
+    last().open();
+    last().receive({ t: 'ak', s: 'Not_Ok' });
+    await expect(p).rejects.toThrow(/ak Not_Ok/);
+    expect(svc.status()).toBe('session-expired');
+    const n = FakeSocket.instances.length;
+    vi.advanceTimersByTime(60_000);
+    expect(FakeSocket.instances.length).toBe(n);
+  });
+
+  it('v2 session: an explicit source on the config wins', async () => {
+    const svc = make({ susertoken: undefined, accessToken: 'FAKE_ACCESS', source: 'WEB' });
+    const p = svc.connect();
+    last().open();
+    expect(last().sent[0]).toMatchObject({ t: 'a', source: 'WEB' });
+    last().receive({ t: 'ak', s: 'OK' });
+    await p;
   });
 
   it('reads the session config on every connect, so a token refreshed after re-login is used', async () => {

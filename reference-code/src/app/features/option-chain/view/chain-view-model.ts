@@ -13,6 +13,8 @@ export interface ChainViewModel {
   mode: 'mirrored' | 'strike';
   rows: RowVM[];
   spotSlot: number | null;
+  /** The analytics ATM strike (null before the first analysis). */
+  atmStrike?: number | null;
   sums: Record<string, { ce: number; pe: number; total: number }>;
   maxOi: { ce: number; pe: number; cum: number };
 }
@@ -106,5 +108,6 @@ export function buildViewModel(args: BuildArgs): ChainViewModel {
     maxOi.cum = Math.max(maxOi.cum, r.s?.cumOi ?? 0);
   }
 
-  return { columns, mode, rows, spotSlot: slot, sums, maxOi };
+  const atmStrike = analytics && analytics.atmStrike !== 0 ? analytics.atmStrike : null;
+  return { columns, mode, rows, spotSlot: slot, atmStrike, sums, maxOi };
 }

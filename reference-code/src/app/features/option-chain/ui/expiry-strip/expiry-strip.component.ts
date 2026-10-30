@@ -70,8 +70,8 @@ export function formatExpiryDate(iso: string): string {
       border: 0; background: transparent; color: var(--ts-muted); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums;
       padding: 3px 7px; min-height: 28px; border-radius: 5px; cursor: pointer;
     }
-    .exp button[aria-pressed='true'] { background: var(--ts-blue); color: var(--ts-on-accent); }
-    .exp button:focus-visible { outline: 2px solid var(--ts-blue); outline-offset: 2px; }
+    .exp button[aria-pressed='true'] { color: var(--ts-outline); box-shadow: inset 0 -2px 0 var(--ts-outline); border-radius: 5px 5px 0 0; }
+    .exp button:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; }
     .stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-left: auto; align-items: center; }
     .stat { display: flex; gap: 6px; align-items: baseline; }
     .k { color: var(--ts-muted); font-size: 12px; }

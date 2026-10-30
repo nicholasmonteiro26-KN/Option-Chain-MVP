@@ -6,3 +6,9 @@ body {
   color: var(--ts-fg);
   font-family: var(--ts-font);
 }
+
+// Native controls follow the theme: checkboxes, scrollbars (the viewport one follows color-scheme, set on <html>).
+body {
+  accent-color: var(--ts-blue);
+  scrollbar-color: var(--ts-scroll-thumb) transparent;
+}

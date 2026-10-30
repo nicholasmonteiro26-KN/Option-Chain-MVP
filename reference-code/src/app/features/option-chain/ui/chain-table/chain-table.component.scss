@@ -26,7 +26,7 @@ th {
   top: 0;
   z-index: 2;
   background: var(--ts-bg2);
-  color: var(--ts-muted);
+  color: var(--ts-th-fg);
   font-weight: 600;
   font-size: 11.5px;
   padding: 8px 10px;
@@ -55,11 +55,23 @@ td {
 td.acts-host, tr.skel td { position: relative; }
 td.k, th.k {
   text-align: center;
-  background: var(--ts-strike);
   font-weight: 600;
   color: var(--ts-fg);
   border-left: 1px solid var(--ts-line);
   border-right: 1px solid var(--ts-line);
+}
+// The strike is a chip; the ATM strike's chip is the dark one (no outline box around the row).
+td.k .chip {
+  display: inline-block;
+  min-width: 3.5em;
+  padding: 1px 8px;
+  border-radius: 3px;
+  background: var(--ts-strike);
+  color: var(--ts-strike-fg);
+}
+td.k.atm .chip {
+  background: var(--ts-atm);
+  color: var(--ts-atm-fg);
 }
 td.itm { background: var(--ts-itm); }
 td.ltp { font-weight: 500; }
@@ -128,7 +140,6 @@ tfoot td {
   font-weight: 600;
   border-top: 1px solid var(--ts-line);
   border-bottom: 0;
-  &.k { background: var(--ts-strike); }
 }
 
 // Spot line: sticks just inside the header / footer when scrolled out of view.

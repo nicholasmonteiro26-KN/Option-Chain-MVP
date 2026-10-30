@@ -1,10 +1,11 @@
-import { inject, Injectable, InjectionToken, Signal, signal, WritableSignal } from '@angular/core';
+import { computed, inject, Injectable, InjectionToken, Signal, signal, WritableSignal } from '@angular/core';
 import type { ChainAnalytics } from '@option-analytics/analyze';
 import { DEFAULT_CONFIG, OptionChainConfig } from '@option-analytics/config';
 import type { LegQuote, OptType } from '@option-analytics/types';
 import { FEED_TRANSPORT, FeedStatus } from './feed/transport';
 import type { TickPartial } from './feed/tick-buffer';
-import { ChainMeta, ContractRef, Expiry, QUICK_UNDERLYINGS, Underlying, underlyingKey } from './models';
+import { ChainMeta, ContractRef, Expiry, Underlying, underlyingKey } from './models';
+import { QuickUnderlyingsService } from './quick-underlyings.service';
 
 /** The analytics/runtime config the feature runs with (a token so tests can flip e.g. `oiUnit`). */
 export const OPTION_CHAIN_CONFIG = new InjectionToken<Readonly<OptionChainConfig>>('OPTION_CHAIN_CONFIG', {
@@ -62,7 +63,10 @@ export class OptionChainStore {
   readonly sessionExpired: WritableSignal<boolean> = signal(false);
 
   /** Feed key -> symbol of the quick-switch underlyings, which stay subscribed for the page's lifetime (D18). */
-  private readonly quickKeys = new Map(QUICK_UNDERLYINGS.map((u) => [underlyingKey(u), u.sym] as const));
+  private readonly quickList = inject(QuickUnderlyingsService).list;
+  private readonly quickKeys = computed(
+    () => new Map(this.quickList().filter((u) => !u.unavailable).map((u) => [underlyingKey(u), u.sym] as const)),
+  );
   /** Merged ticks per quick key, kept across selections (switching back to one gets no fresh ack). */
   private readonly quickCache = new Map<string, TickPartial>();
   private readonly _quickPrices = signal<Readonly<Record<string, QuickQuote>>>({});
@@ -103,9 +107,10 @@ export class OptionChainStore {
     const u = this.underlying();
     const spotKey = u ? underlyingKey(u) : null;
     let quickChanged = false;
+    const quickKeys = this.quickKeys();
     let dataChanged = false;
     for (const [key, partial] of batch) {
-      if (this.quickKeys.has(key)) {
+      if (quickKeys.has(key)) {
         this.quickCache.set(key, { ...this.quickCache.get(key), ...stripUndefined(partial), token: key });
         quickChanged = true;
       }
@@ -145,7 +150,7 @@ export class OptionChainStore {
 
   private publishQuickPrices(): void {
     const out: Record<string, QuickQuote> = {};
-    for (const [key, sym] of this.quickKeys) {
+    for (const [key, sym] of this.quickKeys()) {
       const c = this.quickCache.get(key);
       if (c?.ltp !== undefined && c.ltp !== null) out[sym] = { ltp: c.ltp, prevClose: c.prevClose ?? null };
     }

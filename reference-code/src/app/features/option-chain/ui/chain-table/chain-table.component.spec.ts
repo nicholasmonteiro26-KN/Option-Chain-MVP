@@ -101,6 +101,16 @@ describe('ChainTableComponent mirrored', () => {
     expect(spot!.querySelectorAll('td')[1]!.querySelector('.pill')).not.toBeNull();
   });
 
+  it('marks only the analytics ATM strike chip', () => {
+    const vm = makeVm();
+    const f = setup(vm);
+    const atm = Array.from(el(f).querySelectorAll('td.k.atm'));
+    expect(atm.length).toBe(1);
+    expect(vm.atmStrike).not.toBeNull();
+    expect(text(atm[0])).toBe(String(vm.atmStrike));
+    expect(atm[0]!.querySelector('.chip')).not.toBeNull();
+  });
+
   it('has no spot line when spotSlot is null or not among the visible rows', () => {
     expect(el(setup(makeVm())).querySelectorAll('tr.spot').length).toBe(1);
     TestBed.resetTestingModule();

@@ -43,11 +43,15 @@ let nextId = 0;
     .chip[aria-pressed='true'] { background: var(--ts-blue); border-color: var(--ts-blue); color: var(--ts-on-accent); }
     .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; align-items: center; }
     .lbl { font-size: 12px; color: var(--ts-muted); }
-    .tool {
-      border: 1px solid var(--ts-line); background: var(--ts-bg); color: var(--ts-fg); border-radius: 8px;
+    button.tool {
+      border: 1px solid var(--ts-outline); background: transparent; color: var(--ts-outline); border-radius: 4px;
       padding: 4px 10px; min-height: 32px; font: inherit; font-size: 13px; cursor: pointer;
     }
-    button:focus-visible, select:focus-visible { outline: 2px solid var(--ts-blue); outline-offset: 2px; }
+    select.tool {
+      border: 1px solid var(--ts-input-border); background: var(--ts-input-bg); color: var(--ts-input-fg); border-radius: 4px;
+      padding: 4px 8px; min-height: 32px; font: inherit; font-size: 13px; cursor: pointer;
+    }
+    button:focus-visible, select:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; }
   `,
 })
 export class ViewToolbarComponent {

@@ -3,7 +3,7 @@ import { provideLocationMocks, SpyLocation } from '@angular/common/testing';
 import { Provider, ProviderToken, provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, Router } from '@angular/router';
 import { analyzeChain } from '@option-analytics/analyze';
 import { Subject } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +16,9 @@ import { FEED_TRANSPORT, FeedTransport } from '../data-access/feed/transport';
 import { SessionExpiredError } from '../data-access/kambala/kambala.types';
 import { isNseFoSessionOpen, MARKET_SESSION_RULE } from '../data-access/market-session.service';
 import { OptionChainStore } from '../data-access/option-chain.store';
+import { AuthSessionService } from '../data-access/auth-session.service';
+import { QUICK_UNDERLYINGS } from '../data-access/models';
+import { QuickUnderlyingsService } from '../data-access/quick-underlyings.service';
 import { PREFS_STORAGE } from '../data-access/prefs.store';
 import { KambalaRestClient } from '../data-access/kambala/kambala-rest.client';
 import { MockKambalaRestClient } from '../data-access/testing/mock-kambala-rest.client';
@@ -578,5 +581,112 @@ describe('OptionChainPageComponent lifetime (real feature providers, mock feed)'
     expect(store2.spot()).not.toBeNull();
     second.destroy();
     expect(feed2.status()).toBe('closed');
+  });
+});
+
+describe('OptionChainPageComponent with live data (login session, index tokens)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  function fakeAuth() {
+    return { logout: vi.fn(), session: () => ({ uid: 'TESTUID', actid: 'A', accessToken: 'fake' }), norenConfig: vi.fn() };
+  }
+
+  it('resolves NIFTY / SENSEX tokens with GetIndexList before the first select', async () => {
+    const getIndexList = vi.spyOn(MockKambalaRestClient.prototype, 'getIndexList').mockImplementation(async (exch: string) =>
+      exch === 'NSE' ? [{ idxname: 'Nifty 50', token: '26000' }] : [{ idxname: 'SENSEX', token: '77' }]);
+    const linked = vi.spyOn(MockKambalaRestClient.prototype, 'getLinkedScrips');
+    const ctx = await setup({}, { mock: false, providers: [{ provide: AuthSessionService, useValue: fakeAuth() }] });
+    expect(getIndexList).toHaveBeenCalledWith('NSE');
+    expect(getIndexList).toHaveBeenCalledWith('BSE');
+    expect(getIndexList.mock.invocationCallOrder[0]!).toBeLessThan(linked.mock.invocationCallOrder[0]!);
+    expect(ctx.get(QuickUnderlyingsService).list().map((u) => u.token)).toEqual(['26000', '77']);
+    expect(ctx.transport.subscribedKeys()).toContain('BSE|77');
+    expect(ctx.transport.subscribedKeys()).not.toContain('BSE|1');
+    expect(ctx.store.loadState()).toBe('ready');
+  });
+
+  it('a SENSEX missing from GetIndexList shows its quick button disabled with a reason; NIFTY still works', async () => {
+    vi.spyOn(MockKambalaRestClient.prototype, 'getIndexList').mockImplementation(async (exch: string) =>
+      exch === 'NSE' ? [{ idxname: 'Nifty 50', token: '26000' }] : []);
+    const ctx = await setup({ underlying: 'BSE:SENSEX' }, { mock: false, providers: [{ provide: AuthSessionService, useValue: fakeAuth() }] });
+    const sensex = [...ctx.el.querySelectorAll<HTMLButtonElement>('.qbtn')].find((b) => text(b).startsWith('SENSEX'))!;
+    expect(sensex.disabled).toBe(true);
+    expect(sensex.title).toBe('SENSEX not available for this account');
+    expect(ctx.store.underlying()?.sym).toBe('NIFTY'); // the URL asked for SENSEX: falls back
+    expect(ctx.store.loadState()).toBe('ready');
+  });
+
+  it('a failed GetIndexList keeps NIFTY on 26000 and disables SENSEX (console warning); the page still loads', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(MockKambalaRestClient.prototype, 'getIndexList').mockRejectedValue(new Error('HTTP 502'));
+    const ctx = await setup({}, { mock: false, providers: [{ provide: AuthSessionService, useValue: fakeAuth() }] });
+    expect(warn).toHaveBeenCalled();
+    expect(ctx.get(QuickUnderlyingsService).list()[0]).toEqual(QUICK_UNDERLYINGS[0]);
+    const sensex = [...ctx.el.querySelectorAll<HTMLButtonElement>('.qbtn')].find((b) => text(b).startsWith('SENSEX'))!;
+    expect(sensex.disabled).toBe(true);
+    expect(sensex.title).toBe('SENSEX not available for this account');
+    expect(ctx.transport.subscribedKeys()).not.toContain('BSE|1');
+    expect(ctx.store.loadState()).toBe('ready');
+  });
+
+  it('live data subscribes no quick key before GetIndexList has answered', async () => {
+    let answer!: () => void;
+    vi.spyOn(MockKambalaRestClient.prototype, 'getIndexList').mockImplementation((exch: string) => new Promise((r) => {
+      const prev = answer;
+      answer = () => { prev?.(); r(exch === 'NSE' ? [{ idxname: 'Nifty 50', token: '26000' }] : [{ idxname: 'SENSEX', token: '77' }]); };
+    }));
+    const ctx = await setup({}, { mock: false, providers: [{ provide: AuthSessionService, useValue: fakeAuth() }] });
+    expect(ctx.transport.subscribedKeys()).toEqual([]);
+    answer();
+    await ctx.stable();
+    await ctx.advance(1000);
+    expect(ctx.transport.subscribedKeys()).toEqual(expect.arrayContaining(['NSE|26000', 'BSE|77']));
+    expect(ctx.store.loadState()).toBe('ready');
+  });
+
+  it('session expiry with live data logs out and goes to /login with the returnUrl', async () => {
+    const auth = fakeAuth();
+    const ctx = await setup({}, { mock: false, providers: [{ provide: AuthSessionService, useValue: auth }] });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    // SpyLocation.path() leaves out the query; the browser's Location.path() includes it.
+    vi.spyOn(TestBed.inject(Location), 'path').mockReturnValue('/option-chain?underlying=NSE:NIFTY&expiry=2026-11-03');
+    ctx.transport.expireSession();
+    await ctx.stable();
+    expect(ctx.store.sessionExpired()).toBe(true);
+    expect(auth.logout).toHaveBeenCalledTimes(1);
+    expect(ctx.transport.status()).not.toBe('open');
+    const [commands, extras] = navigate.mock.calls[0]!;
+    expect(commands).toEqual(['/login']);
+    expect(String(extras?.queryParams?.['returnUrl'])).toMatch(/^\/option-chain\?underlying=NSE:NIFTY/);
+  });
+
+  it('session expiry in mock mode keeps the error banner and its Retry (no logout)', async () => {
+    const auth = fakeAuth();
+    const ctx = await setup({}, { providers: [{ provide: AuthSessionService, useValue: auth }] });
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate');
+    ctx.transport.expireSession();
+    await ctx.stable();
+    expect(auth.logout).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(q(ctx, '[data-testid="status-banner"] button')).not.toBeNull();
+  });
+
+  it('Log out (live data only) clears the session, closes the transport and goes to /login', async () => {
+    const auth = fakeAuth();
+    const ctx = await setup({}, { mock: false, providers: [{ provide: AuthSessionService, useValue: auth }] });
+    const nav = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    expect(text(q(ctx, '[data-testid="page-header"]'))).toContain('TESTUID');
+    q(ctx, '[data-testid="logout"]')!.click();
+    expect(auth.logout).toHaveBeenCalledTimes(1);
+    expect(ctx.transport.status()).toBe('closed');
+    expect(nav).toHaveBeenCalledWith('/login');
+  });
+
+  it('mock mode has no Log out button', async () => {
+    const ctx = await setup({});
+    expect(q(ctx, '[data-testid="logout"]')).toBeNull();
   });
 });

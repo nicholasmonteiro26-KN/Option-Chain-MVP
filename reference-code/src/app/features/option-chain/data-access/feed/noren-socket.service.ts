@@ -31,6 +31,17 @@ export const NOREN_RANDOM = new InjectionToken<() => number>('NOREN_RANDOM', {
   factory: () => Math.random,
 });
 
+/**
+ * The connect message for this session shape: v2 OAuth (accessToken) or legacy Noren (susertoken). See
+ * NorenSessionConfig.
+ */
+export function connectMessage(c: NorenSessionConfig): Record<string, string> {
+  if (c.accessToken) {
+    return { t: 'a', uid: c.uid, actid: c.actid, source: c.source ?? 'API', accesstoken: c.accessToken };
+  }
+  return { t: 'c', uid: c.uid, actid: c.actid, source: c.source ?? 'WEB', susertoken: c.susertoken ?? '' };
+}
+
 const DEFAULT_HEARTBEAT_MS = 30_000;
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
@@ -39,7 +50,10 @@ const WS_OPEN = 1;
 
 @Injectable({ providedIn: 'root' })
 export class NorenSocketService implements FeedTransport {
-  // INTEGRATION: provided by TradeSmart auth/session service (a getter, read on every connect)
+  // INTEGRATION: provided by TradeSmart auth/session service (a getter, read on every connect). Its shape picks the
+  // connect message: `accessToken` set -> v2 OAuth {t:'a', uid, actid, source:'API', accesstoken}, ack t:'ak';
+  // `susertoken` only -> legacy Noren {t:'c', uid, actid, source:'WEB', susertoken}, ack t:'ck' (TradeSmart's web
+  // session may still use this one).
   private readonly sessionConfig: () => NorenSessionConfig = inject(NOREN_SESSION_CONFIG);
   /** The session config of the current connection, read when it was opened. */
   private config: NorenSessionConfig = { url: '', uid: '', actid: '', susertoken: '' };
@@ -145,8 +159,7 @@ export class NorenSocketService implements FeedTransport {
     this.socket = socket;
     socket.onopen = () => {
       if (this.socket !== socket) return;
-      const { uid, actid, susertoken } = this.config;
-      socket.send(JSON.stringify({ t: 'c', uid, actid, source: 'WEB', susertoken }));
+      socket.send(JSON.stringify(connectMessage(this.config)));
     };
     socket.onmessage = (ev: { data: unknown }) => {
       if (this.socket !== socket) return;
@@ -171,7 +184,8 @@ export class NorenSocketService implements FeedTransport {
   }
 
   private handle(msg: Record<string, unknown>): void {
-    if (msg['t'] !== 'ck') return;
+    const t = msg['t'];
+    if (t !== 'ak' && t !== 'ck') return; // connect ack: v2 (ak) or legacy (ck)
     const s = String(msg['s'] ?? '').toLowerCase();
     if (s === 'ok') {
       this.attempt = 0;
@@ -183,7 +197,7 @@ export class NorenSocketService implements FeedTransport {
       this.sessionExpired = true;
       this._status.set('session-expired');
       this.clearTimers();
-      this.settleConnect(new KambalaError('WebSocket session rejected (ck Not_Ok)'));
+      this.settleConnect(new KambalaError(`WebSocket session rejected (${String(t)} Not_Ok)`));
       const sock = this.socket;
       this.socket = null;
       if (sock) {

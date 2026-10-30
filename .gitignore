@@ -9,3 +9,8 @@ reference/*.mp4
 # Vendor documentation (not for the repository)
 Kambala API Doc*
 reference/
+
+# Local secrets (never commit)
+.env.local
+.env.local.*
+*.env.local*

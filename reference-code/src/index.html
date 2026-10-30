@@ -11,6 +11,24 @@
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
+  <!-- Sets the theme before Angular boots, so dark mode does not flash light. Same rule as ThemeService (stored choice,
+       else the system setting). Writes nothing if body already has a valid color-theme. TradeSmart's host index.html
+       must not include this script: the host sets body[color-theme] itself. Inline on purpose: a CSP needs
+       script-src 'sha256-...' for it (or move it to a file). -->
+  <script>
+    (function () {
+      var c = document.body.getAttribute('color-theme');
+      if (c === 'light' || c === 'dark') return;
+      var t = null;
+      try { t = localStorage.getItem('ts.theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.body.setAttribute('color-theme', t);
+      document.documentElement.style.colorScheme = t;
+      document.documentElement.setAttribute('data-ts-theme-boot', '');
+    })();
+  </script>
   <app-root></app-root>
 </body>
 </html>

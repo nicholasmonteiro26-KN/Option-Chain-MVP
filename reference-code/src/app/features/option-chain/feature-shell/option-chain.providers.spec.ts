@@ -2,11 +2,15 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
-import { KambalaRestClient } from '../data-access/kambala/kambala-rest.client';
+import { AuthSessionService } from '../data-access/auth-session.service';
+import { KAMBALA_REST_BASE, KambalaRestClient } from '../data-access/kambala/kambala-rest.client';
+import { NOREN_SESSION_CONFIG } from '../data-access/kambala/kambala.types';
+import { QuickUnderlyingsService } from '../data-access/quick-underlyings.service';
 import { MockKambalaRestClient } from '../data-access/testing/mock-kambala-rest.client';
 import { environment } from '../../../../environments/environment';
 import {
-  isMockFeed, OPTION_CHAIN_ALLOW_MOCK_FEED, OPTION_CHAIN_DEV_MODE, OPTION_CHAIN_MOCK_MODE, provideOptionChain,
+  isMockFeed, OPTION_CHAIN_ALLOW_MOCK_FEED, OPTION_CHAIN_DEV_MODE, OPTION_CHAIN_MOCK_MODE, OPTION_CHAIN_USER_ID,
+  provideOptionChain,
 } from './option-chain.providers';
 
 function withSearch(search: string): void {
@@ -81,5 +85,65 @@ describe('option chain providers: mock-mode gate', () => {
     const { mock, rest } = mockMode(false, true);
     expect(mock).toBe(false);
     expect(rest).toBeInstanceOf(KambalaRestClient);
+  });
+});
+
+describe('option chain providers: live session wiring', () => {
+  afterEach(() => {
+    TestBed.resetTestingModule();
+    withSearch('');
+  });
+
+  it('live data: REST goes through the dev proxy and the session getter reads AuthSessionService', () => {
+    const norenConfig = () => ({ url: 'ws://h/kambala-ws', uid: 'U', actid: 'A', accessToken: 'T', source: 'API' });
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(), provideHttpClient(), ...provideOptionChain(),
+        { provide: OPTION_CHAIN_DEV_MODE, useValue: true },
+        { provide: AuthSessionService, useValue: { norenConfig } },
+      ],
+    });
+    expect(TestBed.inject(KAMBALA_REST_BASE)).toBe('/kambala-api');
+    expect(TestBed.inject(NOREN_SESSION_CONFIG)()).toEqual(norenConfig());
+  });
+
+  it('live data: prefs are stored under the signed-in uid ("demo" without a session); mock mode stays "demo"', () => {
+    const user = (session: { uid: string } | null, search = '') => {
+      TestBed.resetTestingModule();
+      withSearch(search);
+      TestBed.configureTestingModule({
+        providers: [
+          provideZonelessChangeDetection(), provideHttpClient(), ...provideOptionChain(),
+          { provide: OPTION_CHAIN_DEV_MODE, useValue: true },
+          { provide: AuthSessionService, useValue: { session: () => session } },
+        ],
+      });
+      return TestBed.inject(OPTION_CHAIN_USER_ID);
+    };
+    expect(user({ uid: 'TESTUID' })).toBe('TESTUID');
+    expect(user(null)).toBe('demo');
+    expect(user({ uid: 'TESTUID' }, '?feed=mock')).toBe('demo');
+  });
+
+  it('live data: the quick underlyings wait for GetIndexList; mock mode is ready at once', () => {
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), provideHttpClient(), ...provideOptionChain(), { provide: OPTION_CHAIN_DEV_MODE, useValue: true }],
+    });
+    expect(TestBed.inject(QuickUnderlyingsService).ready()).toBe(false);
+    TestBed.resetTestingModule();
+    withSearch('?feed=mock');
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), provideHttpClient(), ...provideOptionChain(), { provide: OPTION_CHAIN_DEV_MODE, useValue: true }],
+    });
+    expect(TestBed.inject(QuickUnderlyingsService).ready()).toBe(true);
+  });
+
+  it('mock mode keeps its fake session and needs no REST base', () => {
+    withSearch('?feed=mock');
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), provideHttpClient(), ...provideOptionChain(), { provide: OPTION_CHAIN_DEV_MODE, useValue: true }],
+    });
+    expect(TestBed.inject(KAMBALA_REST_BASE)).toBe('');
+    expect(TestBed.inject(NOREN_SESSION_CONFIG)()).toMatchObject({ uid: 'demo', susertoken: '' });
   });
 });

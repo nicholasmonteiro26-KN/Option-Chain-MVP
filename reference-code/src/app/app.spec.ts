@@ -24,4 +24,8 @@ describe('App', () => {
     expect(routes.find((r) => r.path === '')).toMatchObject({ redirectTo: 'option-chain', pathMatch: 'full' });
     expect(typeof routes.find((r) => r.path === 'option-chain')?.loadChildren).toBe('function');
   });
+
+  it('has a lazy /login route for live data', () => {
+    expect(typeof routes.find((r) => r.path === 'login')?.loadComponent).toBe('function');
+  });
 });

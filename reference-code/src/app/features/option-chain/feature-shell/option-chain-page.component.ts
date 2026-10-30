@@ -3,7 +3,7 @@ import {
   afterRenderEffect, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, signal,
   untracked,
 } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { DEFAULT_CONFIG } from '@option-analytics/config';
 import type { LegQuote } from '@option-analytics/types';
 import { AnalyticsBridge } from '../analytics/analytics.bridge';
@@ -14,7 +14,9 @@ import { FEED_TRANSPORT } from '../data-access/feed/transport';
 import { KambalaRestApi, KambalaRestClient } from '../data-access/kambala/kambala-rest.client';
 import { ScripSearchResult, SessionExpiredError } from '../data-access/kambala/kambala.types';
 import { MarketSessionService } from '../data-access/market-session.service';
+import { AuthSessionService } from '../data-access/auth-session.service';
 import { ChainMeta, Expiry, QUICK_UNDERLYINGS, splitFeedKey, Underlying } from '../data-access/models';
+import { QuickUnderlyingsService } from '../data-access/quick-underlyings.service';
 import { OptionChainStore } from '../data-access/option-chain.store';
 import { CustomPreset, CustomView, Prefs, PrefsStore } from '../data-access/prefs.store';
 import { MockMarket } from '../data-access/testing/mock-market';
@@ -27,11 +29,11 @@ import { ExpiryStats, ExpiryStripComponent, formatExpiryDate } from '../ui/expir
 import { FooterActionsComponent } from '../ui/footer-actions/footer-actions.component';
 import { BannerKind, StatusBannerComponent } from '../ui/status-banner/status-banner.component';
 import { Ohlc, QuickPrice, UnderlyingBarComponent } from '../ui/underlying-bar/underlying-bar.component';
+import { ThemeToggleComponent } from '../ui/theme-toggle/theme-toggle.component';
 import { StrikeCount, ViewToolbarComponent } from '../ui/view-toolbar/view-toolbar.component';
 import { buildViewModel, ChainViewModel } from '../view/chain-view-model';
 import { OPTION_CHAIN_MOCK_MODE, OPTION_CHAIN_USER_ID, provideOptionChain } from './option-chain.providers';
 
-const NIFTY = QUICK_UNDERLYINGS[0]!;
 /** The Custom view before the user edits it (mockup default). */
 const DEFAULT_CUSTOM: CustomView = { mode: 'mirrored', columns: ['oi', 'oiChg', 'iv', 'delta', 'ltp'] };
 const STALE_CHECK_MS = 5000;
@@ -52,8 +54,10 @@ interface MockHooksWindow {
 }
 
 /** A search row as an option underlying. INTEGRATION: filter to F&O underlyings once Kambala says how (Q8). */
-export function searchRowToUnderlying(r: ScripSearchResult): Underlying | null {
-  const quick = QUICK_UNDERLYINGS.find((q) => q.exch === r.exch && q.token === r.token);
+export function searchRowToUnderlying(
+  r: ScripSearchResult, quickList: readonly Underlying[] = QUICK_UNDERLYINGS,
+): Underlying | null {
+  const quick = quickList.find((q) => q.exch === r.exch && q.token === r.token && !q.unavailable);
   if (quick) return quick;
   if (r.exch !== 'NSE' && r.exch !== 'BSE') return null;
   return {
@@ -70,7 +74,7 @@ export function searchRowToUnderlying(r: ScripSearchResult): Underlying | null {
   selector: 'oc-option-chain-page',
   imports: [
     UnderlyingBarComponent, ViewToolbarComponent, ExpiryStripComponent, StatusBannerComponent, ColumnChooserComponent,
-    ChainTableComponent, FooterActionsComponent,
+    ChainTableComponent, FooterActionsComponent, ThemeToggleComponent,
   ],
   // The feature's services live and die with the page (not the route): store, facade, socket / mock feed, worker.
   providers: provideOptionChain(),
@@ -93,8 +97,17 @@ export class OptionChainPageComponent {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly transport = inject(FEED_TRANSPORT);
   private readonly session = inject(MarketSessionService);
+  private readonly auth = inject(AuthSessionService);
+  private readonly router = inject(Router);
+  private readonly quickSvc = inject(QuickUnderlyingsService);
 
-  protected readonly quick = QUICK_UNDERLYINGS;
+  /** NIFTY, SENSEX: tokens from GetIndexList with live data (an unavailable SENSEX shows disabled). */
+  protected readonly quick = this.quickSvc.list;
+  /** The default underlying (NIFTY, always first). */
+  private readonly nifty = computed(() => this.quick()[0]!);
+  /** Live data only: the Log out button and the signed-in user. */
+  protected readonly live = !this.mockMode;
+  protected readonly signedInAs = computed(() => this.auth.session()?.uid ?? null);
   protected readonly prefs = signal<Prefs>(this.prefsStore.load(this.userId));
   /** Custom editor open (it only shows while the Custom preset is selected, D20). Closed on load. */
   protected readonly editorOpen = signal(false);
@@ -116,7 +129,7 @@ export class OptionChainPageComponent {
   private cancelStale: (() => void) | null = null;
   private cancelStatus: (() => void) | null = null;
 
-  protected readonly selected = computed(() => this.store.underlying() ?? NIFTY);
+  protected readonly selected = computed(() => this.store.underlying() ?? this.nifty());
   protected readonly presetId = computed(() => this.prefs().preset);
   protected readonly customView = computed(() => this.prefs().custom ?? DEFAULT_CUSTOM);
   protected readonly showEditor = computed(() => this.presetId() === 'custom' && this.editorOpen());
@@ -240,10 +253,12 @@ export class OptionChainPageComponent {
     });
 
     effect(() => {
-      if (!this.store.sessionExpired()) return;
-      // INTEGRATION: AuthService.relogin() — hand off to TradeSmart's existing login (spec §6). No retry loop here.
-      // After re-login, refresh the NOREN_SESSION_CONFIG getter's session and call facade.reconnect() (or let the
-      // user press the error banner's Retry, which does the same).
+      if (!this.store.sessionExpired() || this.mockMode) return;
+      // INTEGRATION: AuthService.relogin(). The standalone app logs out and goes to /login, which returns here (a new
+      // page, so a fresh session config and connection). TradeSmart's shell can swap this for its own login; after
+      // re-login, refresh the NOREN_SESSION_CONFIG getter's session and call facade.reconnect() (or let the user
+      // press the error banner's Retry, which does the same). No retry loop here.
+      untracked(() => this.toLogin(this.location.path() || '/option-chain'));
     });
 
     // After a load or a switch, scroll the table so the spot line sits mid-box (once the rows have rendered).
@@ -275,6 +290,12 @@ export class OptionChainPageComponent {
 
   private async init(): Promise<void> {
     const qp = this.route.snapshot.queryParamMap;
+    // Live data: this account's index tokens (GetIndexList) before the first select. Never throws: a failed call
+    // keeps the built-in tokens.
+    if (!this.mockMode) {
+      await this.quickSvc.resolve(this.rest);
+      if (this.destroyed) return;
+    }
     const u = await this.resolveUnderlying(qp.get('underlying'));
     if (this.destroyed) return;
     if (!u) {
@@ -293,20 +314,21 @@ export class OptionChainPageComponent {
    */
   private async resolveUnderlying(param: string | null): Promise<Underlying | null> {
     const m = /^(NSE|BSE):([A-Za-z0-9&_-]+)$/i.exec(param?.trim() ?? '');
-    if (!m) return NIFTY;
+    const nifty = this.nifty();
+    if (!m) return nifty;
     const exch = m[1]!.toUpperCase();
     const sym = m[2]!.toUpperCase();
-    const quick = QUICK_UNDERLYINGS.find((q) => q.exch === exch && q.sym === sym);
-    if (quick) return quick;
+    const quick = this.quick().find((q) => q.exch === exch && q.sym === sym);
+    if (quick) return quick.unavailable ? nifty : quick;
     try {
       const rows = await this.rest.searchScrip(sym);
-      return rows.map(searchRowToUnderlying).find((x) => x?.exch === exch && x.sym === sym) ?? NIFTY;
+      return rows.map((r) => searchRowToUnderlying(r, this.quick())).find((x) => x?.exch === exch && x.sym === sym) ?? nifty;
     } catch (err) {
       if (err instanceof SessionExpiredError) {
         this.facade.markSessionExpired();
         return null;
       }
-      return NIFTY;
+      return nifty;
     }
   }
 
@@ -325,7 +347,22 @@ export class OptionChainPageComponent {
   // ---- template handlers ---------------------------------------------------------------------------------------
 
   protected onSelectUnderlying(u: Underlying): void {
+    if (u.unavailable) return;
     void this.select(u);
+  }
+
+  /** Log out (live data): clears the session, closes the socket, then shows the login page. */
+  protected logout(): void {
+    this.auth.logout();
+    this.transport.close();
+    this.router.navigateByUrl('/login').catch(() => undefined);
+  }
+
+  /** Session expired (live data): drop the dead session and log in again, coming back to `returnUrl`. */
+  private toLogin(returnUrl: string): void {
+    this.auth.logout();
+    this.transport.close();
+    this.router.navigate(['/login'], { queryParams: { returnUrl } }).catch(() => undefined);
   }
 
   protected async onSearch(text: string): Promise<void> {
@@ -342,7 +379,7 @@ export class OptionChainPageComponent {
     const seen = new Set<string>();
     const results: Underlying[] = [];
     for (const r of rows) {
-      const u = searchRowToUnderlying(r);
+      const u = searchRowToUnderlying(r, this.quick());
       if (!u || seen.has(`${u.exch}|${u.token}`)) continue;
       seen.add(`${u.exch}|${u.token}`);
       results.push(u);

@@ -46,3 +46,8 @@ Thumbs.db
 # Playwright
 /test-results/
 /playwright-report/
+
+# Local secrets (never commit)
+.env.local
+.env.local.*
+!.env.local.example

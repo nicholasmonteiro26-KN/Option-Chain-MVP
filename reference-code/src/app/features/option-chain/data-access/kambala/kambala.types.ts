@@ -86,16 +86,28 @@ export class SessionExpiredError extends KambalaError {
   }
 }
 
-/** Session/connection details for the Kambala (Noren) API. */
+/**
+ * Session/connection details for the Kambala (Noren) API. The login method is chosen by the shape:
+ * - **TradeSmart v2 OAuth** (the standalone app): `accessToken` is set. REST calls send
+ *   `Authorization: Bearer <accessToken>` and no jKey; the WebSocket connect message is
+ *   `{t:"a", uid, actid, source:"API", accesstoken}`, acknowledged with `t:"ak"`.
+ * - **Legacy Noren session** (e.g. TradeSmart's own web session): `susertoken` only. REST calls send it as
+ *   `jKey`; the connect message is `{t:"c", uid, actid, source, susertoken}`, acknowledged with `t:"ck"`.
+ */
 export interface NorenSessionConfig {
-  /** WebSocket URL, e.g. wss://host/NorenStream/NorenWS */
+  /** WebSocket URL, e.g. wss://host/NorenWSAPI/ */
   url: string;
   uid: string;
   actid: string;
-  /** Session token: sent as `jKey` on REST calls and `susertoken` on the WebSocket connect message. */
-  susertoken: string;
+  /** v2 OAuth access token (GenAcsTok). When set, the v2 auth path is used everywhere. */
+  accessToken?: string;
+  /** Legacy Noren session token: `jKey` on REST calls and `susertoken` on the WebSocket connect message. */
+  susertoken?: string;
   /** Heartbeat interval in ms. Kambala does not document one; default 30000. */
   heartbeatMs?: number;
+  /** `source` on the WebSocket connect message; it should match the login's source. Default 'API' with an
+   *  accessToken, else 'WEB'. */
+  source?: string;
 }
 
 /**
@@ -103,5 +115,20 @@ export interface NorenSessionConfig {
  * without recreating the page.
  */
 // INTEGRATION: provided by TradeSmart auth/session service, as a getter of the current session (refresh it after
-// re-login, then call ChainFeedFacade.reconnect())
+// re-login, then call ChainFeedFacade.reconnect()). Give `accessToken` for a v2 OAuth session (Bearer REST, t:"a"
+// WebSocket connect) or only `susertoken` for a legacy Noren web session (jKey REST, t:"c" connect): see above.
 export const NOREN_SESSION_CONFIG = new InjectionToken<() => NorenSessionConfig>('NOREN_SESSION_CONFIG');
+
+/** UserDetails: the fields the option chain reads (`exarr`: enabled exchanges). */
+export interface UserDetailsResult {
+  uid?: string;
+  actid?: string;
+  uname?: string;
+  exarr?: string[];
+}
+
+/** One GetIndexList row: index name and the token used to subscribe. */
+export interface IndexListEntry {
+  idxname: string;
+  token: string;
+}

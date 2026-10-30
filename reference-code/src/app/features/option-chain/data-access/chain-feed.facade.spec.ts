@@ -8,6 +8,7 @@ import { TickBuffer } from './feed/tick-buffer';
 import { CHAIN_FEED_CLOCK, CHAIN_FEED_SCHEDULER, ChainFeedFacade } from './chain-feed.facade';
 import { OptionChainStore } from './option-chain.store';
 import { QUICK_UNDERLYINGS, Underlying } from './models';
+import { QuickUnderlyingsService } from './quick-underlyings.service';
 import { chainRows, NIFTY_LINKED, NOW_MS, range } from './testing/chain-fixtures';
 
 const NIFTY = QUICK_UNDERLYINGS.find((u) => u.sym === 'NIFTY') as Underlying;
@@ -37,6 +38,8 @@ interface SetupOpts {
   chain?: (tsym: string) => Promise<OptionChainRow[]>;
   /** Clock -> TickBuffer; default a synchronous one (flush on every push). */
   buffer?: (clock: () => number) => TickBuffer;
+  /** Live data: quick-underlying tokens still to be resolved (as provideOptionChain sets up). */
+  quickPending?: boolean;
 }
 
 function setup(opts: SetupOpts = {}) {
@@ -89,6 +92,12 @@ function setup(opts: SetupOpts = {}) {
       { provide: CHAIN_FEED_CLOCK, useValue: () => now },
       OptionChainStore,
       ChainFeedFacade,
+      ...(opts.quickPending
+        ? [{
+          provide: QuickUnderlyingsService,
+          useFactory: () => { const s = new QuickUnderlyingsService(); s.expectResolution(); return s; },
+        }]
+        : []),
     ],
   });
   const facade = TestBed.inject(ChainFeedFacade);
@@ -184,6 +193,32 @@ describe('ChainFeedFacade', () => {
     expect(pairs.slice(0, -1).map(([, k]) => k).sort()).toEqual(keysOf(ROWS_03).sort());
     // NIFTY's key is released by the selection but stays on the wire for its quick-switch button.
     expect(transport.subscribedKeys().sort()).toEqual([SENSEX_KEY, SPOT_KEY, 'NSE|26009'].sort());
+  });
+
+  it('moves the quick-switch subscriptions to tokens resolved from GetIndexList (an unavailable SENSEX is dropped)', async () => {
+    const { transport } = setup();
+    expect(transport.subscribedKeys().sort()).toEqual([SENSEX_KEY, SPOT_KEY].sort());
+    await TestBed.inject(QuickUnderlyingsService).resolve({
+      getIndexList: async (exch: string) => (exch === 'NSE' ? [{ idxname: 'Nifty 50', token: '26900' }] : []),
+    });
+    TestBed.tick();
+    expect(transport.subscribedKeys()).toEqual(['NSE|26900']);
+  });
+
+  it('live data: subscribes no quick key until GetIndexList has resolved, then only the resolved ones', async () => {
+    const { transport } = setup({ quickPending: true });
+    const quick = TestBed.inject(QuickUnderlyingsService);
+    TestBed.tick();
+    expect(transport.subscribedKeys()).toEqual([]);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await quick.resolve({
+      getIndexList: async (exch: string) => {
+        if (exch === 'BSE') throw new Error('HTTP 502');
+        return [{ idxname: 'Nifty 50', token: '26000' }];
+      },
+    });
+    TestBed.tick();
+    expect(transport.subscribedKeys()).toEqual(['NSE|26000']); // SENSEX unavailable: never 'BSE|1'
   });
 
   it('keeps both quick-switch keys subscribed across selections and on the wire only once', async () => {

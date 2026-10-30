@@ -8,6 +8,20 @@
   --ts-muted: #777777;
   --ts-line: rgba(148, 148, 148, 0.3);
   --ts-strike: #dddddd;
+  --ts-strike-fg: #555555;
+  --ts-atm: #555555;
+  --ts-atm-fg: #ffffff;
+  // Header bar (white, lifted by a soft shadow) and table column headings
+  --ts-header-bg: #ffffff;
+  --ts-header-shadow: 0 0 8px rgba(0, 0, 0, 0.15);
+  --ts-th-fg: #000000;
+  // Inputs and outline buttons
+  --ts-input-bg: #ffffff;
+  --ts-input-border: #dee2e6;
+  --ts-input-fg: #555555;
+  --ts-outline: #3f71eb;
+  --ts-focus: #3f71eb;
+  --ts-scroll-thumb: rgba(148, 148, 148, 0.55);
   --ts-itm: #fff9ee;
   --ts-blue: #3f71eb;
   --ts-blue-soft: #ecf1fd;
@@ -36,6 +50,18 @@ body[color-theme='dark'] {
   --ts-muted: #949494;
   --ts-line: rgba(148, 148, 148, 0.2);
   --ts-strike: #151f35;
+  --ts-strike-fg: #cccccc;
+  --ts-atm: #233050;
+  --ts-atm-fg: #ffffff;
+  --ts-header-bg: #20293f;
+  --ts-header-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+  --ts-th-fg: #ffffff;
+  --ts-input-bg: #0a1222;
+  --ts-input-border: rgba(148, 148, 148, 0.3);
+  --ts-input-fg: #cccccc;
+  --ts-outline: #7fa2f5;
+  --ts-focus: #7fa2f5;
+  --ts-scroll-thumb: rgba(148, 148, 148, 0.45);
   --ts-itm: #20293f;
   --ts-blue-soft: #233050;
   --ts-green-soft: rgba(57, 176, 14, 0.2);

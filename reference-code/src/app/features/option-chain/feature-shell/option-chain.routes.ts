@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { optionChainAuthGuard } from './option-chain.guard';
 import { OptionChainPageComponent } from './option-chain-page.component';
 
 /**
@@ -6,5 +7,5 @@ import { OptionChainPageComponent } from './option-chain-page.component';
  * feature's providers live on the page component (not the route), so they are destroyed with the page.
  */
 export const OPTION_CHAIN_ROUTES: Routes = [
-  { path: '', component: OptionChainPageComponent, title: 'Option Chain' },
+  { path: '', component: OptionChainPageComponent, title: 'Option Chain', canActivate: [optionChainAuthGuard] },
 ];

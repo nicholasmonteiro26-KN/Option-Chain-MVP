@@ -16,10 +16,11 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
     :host { display: block; color: var(--ts-fg); background: var(--ts-bg); font-family: var(--ts-font); }
     .foot { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--ts-line); font-size: 13px; }
     .tool {
-      border: 1px solid var(--ts-line); background: var(--ts-bg); color: var(--ts-fg); border-radius: 8px;
+      border: 1px solid var(--ts-outline); background: transparent; color: var(--ts-outline); border-radius: 4px;
       padding: 4px 10px; min-height: 32px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
     }
-    .tool:focus-visible { outline: 2px solid var(--ts-blue); outline-offset: 2px; }
+    .tool:disabled { border-color: var(--ts-line); color: var(--ts-muted); cursor: not-allowed; }
+    .tool:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; }
     .sp { margin-left: auto; color: var(--ts-muted); font-variant-numeric: tabular-nums; }
   `,
 })

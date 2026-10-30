@@ -86,10 +86,12 @@
               "buildTarget": "option-chain-ref:build:production"
             },
             "development": {
-              "buildTarget": "option-chain-ref:build:development"
+              "buildTarget": "option-chain-ref:build:development",
+              "proxyConfig": "proxy.conf.mjs"
             },
             "perf": {
-              "buildTarget": "option-chain-ref:build:perf"
+              "buildTarget": "option-chain-ref:build:perf",
+              "proxyConfig": "proxy.conf.mjs"
             }
           },
           "defaultConfiguration": "development"

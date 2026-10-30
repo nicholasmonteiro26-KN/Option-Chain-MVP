@@ -25,7 +25,14 @@ const money = (v: number | null | undefined): string =>
     <div class="quick">
       <div class="quick-list">
         @for (u of quick(); track u.sym) {
-          <button type="button" class="qbtn" [attr.aria-pressed]="u.sym === selected().sym" (click)="select.emit(u)">
+          <button
+            type="button"
+            class="qbtn"
+            [attr.aria-pressed]="u.sym === selected().sym"
+            [disabled]="!!u.unavailable"
+            [attr.title]="u.unavailable ?? null"
+            (click)="select.emit(u)"
+          >
             <b>{{ u.sym }}</b>
             @if (quickPrices()[u.sym]; as p) {
               <span>
@@ -103,15 +110,16 @@ const money = (v: number | null | undefined): string =>
       align-items: flex-start; line-height: 1.25; min-width: 96px; min-height: 44px;
     }
     .qbtn b { font-weight: 600; }
+    .qbtn:disabled { color: var(--ts-muted); background: var(--ts-bg2); cursor: not-allowed; }
     .qbtn span { font-size: 11.5px; font-variant-numeric: tabular-nums; }
     .qbtn[aria-pressed='true'] { border-color: var(--ts-blue); box-shadow: inset 0 0 0 1px var(--ts-blue); background: var(--ts-blue-soft); }
-    .qbtn:focus-visible, input:focus-visible { outline: 2px solid var(--ts-blue); outline-offset: 2px; }
+    .qbtn:focus-visible, input:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; }
     .pos { color: var(--ts-green); }
     .neg { color: var(--ts-red); }
     .search { position: relative; margin-left: auto; flex: 0 1 300px; min-width: 200px; }
     .search input {
       width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 7px 10px;
-      border: 1px solid var(--ts-line); border-radius: 8px; background: var(--ts-bg); color: var(--ts-fg);
+      border: 1px solid var(--ts-input-border); border-radius: 4px; background: var(--ts-input-bg); color: var(--ts-input-fg);
     }
     .search ul {
       position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; margin: 0; padding: 4px; list-style: none;
@@ -132,7 +140,7 @@ const money = (v: number | null | undefined): string =>
   `,
 })
 export class UnderlyingBarComponent {
-  readonly quick = input.required<Underlying[]>();
+  readonly quick = input.required<readonly Underlying[]>();
   readonly selected = input.required<Underlying>();
   readonly quickPrices = input<Record<string, QuickPrice>>({});
   readonly ohlc = input<Ohlc>({ open: null, high: null, low: null, prevClose: null });

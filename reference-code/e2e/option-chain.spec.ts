@@ -173,3 +173,65 @@ test('the spot line sticks to the edges and the row before it stays 22850', asyn
   }
   expect(seen).toEqual(new Array(20).fill('22850'));
 });
+
+test('live data without a session goes to the login page, keeping the URL as returnUrl', async ({ page }) => {
+  await page.goto('/option-chain?underlying=NSE:NIFTY');
+  await expect(page).toHaveURL(/\/login\?returnUrl=%2Foption-chain%3Funderlying%3DNSE:NIFTY/, T);
+  await expect(page.getByLabel('Client ID')).toBeVisible();
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
+  await expect(page.getByText('Your password and OTP are never entered here.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Log in with TradeSmart' })).toBeEnabled();
+});
+
+test('a direct visit to /auth/callback says no login is in progress, drops the code from the URL, and links back to /login', async ({ page }) => {
+  await page.goto('/auth/callback?code=FAKE_CODE_FOR_TEST');
+  await expect(page.getByRole('heading', { name: 'No login in progress' })).toBeVisible(T);
+  expect(page.url()).not.toContain('code=');
+  await page.getByRole('link', { name: 'Try again' }).click();
+  await expect(page).toHaveURL(/\/login$/, T);
+});
+
+test.describe('theme', () => {
+  const bg = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
+  test('toggle switches to dark, survives a reload, and switches back', async ({ page }) => {
+    await open(page);
+    const toggle = page.getByTestId('theme-toggle');
+    await expect(page.locator('body')).toHaveAttribute('color-theme', 'light');
+    expect(await bg(page)).toBe('rgb(255, 255, 255)');
+    await expect(toggle).toHaveAttribute('aria-label', 'Switch to dark theme');
+
+    await toggle.click();
+    await expect(page.locator('body')).toHaveAttribute('color-theme', 'dark');
+    expect(await bg(page)).toBe('rgb(10, 18, 34)');
+    await expect(toggle).toHaveAttribute('aria-label', 'Switch to light theme');
+
+    await page.reload();
+    await expect(rows(page)).toHaveCount(16, T);
+    await expect(page.locator('body')).toHaveAttribute('color-theme', 'dark');
+    expect(await bg(page)).toBe('rgb(10, 18, 34)');
+
+    await page.getByTestId('theme-toggle').click();
+    await expect(page.locator('body')).toHaveAttribute('color-theme', 'light');
+    expect(await bg(page)).toBe('rgb(255, 255, 255)');
+  });
+
+  test('the toggle works on the login page', async ({ page }) => {
+    await page.goto('/login');
+    const toggle = page.getByTestId('theme-toggle');
+    await expect(toggle).toBeVisible(T);
+    expect(await bg(page)).toBe('rgb(255, 255, 255)');
+    await toggle.click();
+    await expect(page.locator('body')).toHaveAttribute('color-theme', 'dark');
+    expect(await bg(page)).toBe('rgb(10, 18, 34)');
+    await expect(toggle).toHaveAttribute('aria-label', 'Switch to light theme');
+  });
+
+  test('follows the system setting until a choice is made', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await open(page);
+    await expect(page.locator('body')).toHaveAttribute('color-theme', 'dark');
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(page.locator('body')).toHaveAttribute('color-theme', 'light');
+  });
+});

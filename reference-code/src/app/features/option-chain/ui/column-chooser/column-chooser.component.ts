@@ -94,15 +94,15 @@ export interface RenamePresetEvent { id: string; name: string }
     .saved li { display: flex; gap: 8px; align-items: center; padding: 2px 0; }
     .saved li .apply { min-width: 120px; text-align: left; }
     .error { margin: 0; color: var(--ts-red); }
-    input[type='text'] { font: inherit; padding: 4px 8px; border: 1px solid var(--ts-line); border-radius: 6px; background: var(--ts-bg); color: var(--ts-fg); }
+    input[type='text'] { font: inherit; padding: 4px 8px; border: 1px solid var(--ts-input-border); border-radius: 4px; background: var(--ts-input-bg); color: var(--ts-input-fg); }
     .tool, .mv {
-      border: 1px solid var(--ts-line); background: var(--ts-bg); color: var(--ts-fg); border-radius: 8px;
+      border: 1px solid var(--ts-outline); background: transparent; color: var(--ts-outline); border-radius: 4px;
       padding: 4px 10px; min-height: 32px; font: inherit; font-size: 13px; cursor: pointer;
     }
     .mv { min-width: 32px; padding: 4px; }
     .mv:disabled { opacity: 0.4; cursor: default; }
     .tool[aria-pressed='true'], .primary { background: var(--ts-blue); border-color: var(--ts-blue); color: var(--ts-on-accent); }
-    button:focus-visible, input:focus-visible { outline: 2px solid var(--ts-blue); outline-offset: 2px; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; }
   `,
 })
 export class ColumnChooserComponent {

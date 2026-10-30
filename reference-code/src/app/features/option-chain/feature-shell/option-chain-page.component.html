@@ -1,6 +1,16 @@
 <main class="page" aria-label="Option chain">
+  <header class="top" data-testid="page-header">
+    <h1>Option chain</h1>
+    @if (live && signedInAs(); as uid) {
+      <span class="who">{{ uid }}</span>
+    }
+    <oc-theme-toggle />
+    @if (live) {
+      <button type="button" class="logout" data-testid="logout" (click)="logout()">Log out</button>
+    }
+  </header>
   <oc-underlying-bar
-    [quick]="quick"
+    [quick]="quick()"
     [selected]="selected()"
     [quickPrices]="quickPrices()"
     [ohlc]="ohlc()"

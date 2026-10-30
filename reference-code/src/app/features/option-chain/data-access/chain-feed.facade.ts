@@ -5,8 +5,9 @@ import { SessionExpiredError } from './kambala/kambala.types';
 import { FEED_TRANSPORT } from './feed/transport';
 import { TickBuffer, TickMessage } from './feed/tick-buffer';
 import { InstrumentsService } from './instruments.service';
-import { ChainMeta, contractKeys, QUICK_UNDERLYINGS, Underlying, underlyingKey } from './models';
+import { ChainMeta, contractKeys, Underlying, underlyingKey } from './models';
 import { OPTION_CHAIN_CONFIG, OptionChainStore } from './option-chain.store';
+import { QuickUnderlyingsService } from './quick-underlyings.service';
 
 /** One-shot timer returning a cancel function. */
 export type OneShotScheduler = (cb: () => void, ms: number) => () => void;
@@ -25,7 +26,6 @@ export const CHAIN_FEED_CLOCK = new InjectionToken<() => number>('CHAIN_FEED_CLO
 });
 
 const SPOT_TIMEOUT_MS = 5000;
-const QUICK_KEYS = QUICK_UNDERLYINGS.map(underlyingKey);
 /** 1 attempt + 2 retries (spec §6). */
 const MAX_ATTEMPTS = 3;
 
@@ -60,6 +60,13 @@ export class ChainFeedFacade {
   private chainLoadedMs = 0;
   private spotWaiter: ((ok: boolean) => void) | null = null;
   private quickSubscribed = false;
+  /** Feed keys of the quick-switch underlyings (their tokens may be resolved from GetIndexList after startup). */
+  private readonly quickKeysSignal = inject(QuickUnderlyingsService).keys;
+  private readonly quickReady = inject(QuickUnderlyingsService).ready;
+  /** The page wants the quick keys held (from construction until a session expiry or destroy). */
+  private quickWanted = false;
+  /** The quick keys currently held (subscribed) or to subscribe next. */
+  private quickKeys: string[] = this.quickKeysSignal();
 
   constructor() {
     const sub = this.transport.messages.subscribe((m) => {
@@ -81,6 +88,12 @@ export class ChainFeedFacade {
     effect(() => {
       const limit = this.transport.limitReached();
       if (limit !== null) untracked(() => this.onLimitReached(limit));
+    });
+    // Live data: the quick keys are subscribed once GetIndexList has resolved their tokens (and moved if they change).
+    effect(() => {
+      const keys = this.quickKeysSignal();
+      this.quickReady();
+      untracked(() => this.syncQuickKeys(keys));
     });
     // WS-side session expiry (ck Not_Ok) surfaces through the same store signal as REST expiry.
     effect(() => {
@@ -334,20 +347,36 @@ export class ChainFeedFacade {
    * transport ref-counts, so select() subscribing and unsubscribing the same key never drops these.
    */
   private subscribeQuick(): void {
-    if (this.quickSubscribed) return;
+    this.quickWanted = true;
+    // With live data the tokens come from GetIndexList: nothing is subscribed until they are resolved.
+    if (this.quickSubscribed || !untracked(this.quickReady)) return;
     this.quickSubscribed = true;
-    this.transport.subscribe(QUICK_KEYS);
+    if (this.quickKeys.length > 0) this.transport.subscribe(this.quickKeys);
   }
 
   private unsubscribeQuick(): void {
+    this.quickWanted = false;
+    this.dropQuick();
+  }
+
+  private dropQuick(): void {
     if (!this.quickSubscribed) return;
     this.quickSubscribed = false;
-    this.transport.unsubscribe(QUICK_KEYS);
+    if (this.quickKeys.length > 0) this.transport.unsubscribe(this.quickKeys);
+  }
+
+  /** New quick keys (resolved tokens) or readiness: move the held subscriptions over, or make the first one. */
+  private syncQuickKeys(keys: string[]): void {
+    if (keys.length !== this.quickKeys.length || keys.some((k, i) => k !== this.quickKeys[i])) {
+      this.dropQuick();
+      this.quickKeys = keys;
+    }
+    if (this.quickWanted) this.subscribeQuick();
   }
 
   /** Quick keys held besides the selected underlying: they count against the subscription limit too. */
   private extraQuickKeys(): number {
-    return this.quickSubscribed ? QUICK_KEYS.filter((k) => k !== this.subscribedUnderlying).length : 0;
+    return this.quickSubscribed ? this.quickKeys.filter((k) => k !== this.subscribedUnderlying).length : 0;
   }
 
   private unsubscribeAll(): void {

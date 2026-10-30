@@ -25,7 +25,7 @@ export type BannerKind = 'reconnecting' | 'closed' | 'error' | 'analytics-unavai
       margin-left: auto; border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 8px;
       padding: 4px 12px; min-height: 32px; font: inherit; font-size: 13px; cursor: pointer;
     }
-    button:focus-visible { outline: 2px solid var(--ts-blue); outline-offset: 2px; }
+    button:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; }
   `,
 })
 export class StatusBannerComponent {

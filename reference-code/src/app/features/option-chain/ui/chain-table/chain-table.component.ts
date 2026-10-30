@@ -56,6 +56,8 @@ interface RowView {
   /** Strike-mode cells (everything after the strike). */
   cells: CellVM[];
   spotAfter: boolean;
+  /** The analytics ATM strike: its strike chip is highlighted. */
+  atm: boolean;
 }
 interface SumCell { id: string; text: string }
 
@@ -120,6 +122,7 @@ export class ChainTableComponent {
         pe: mirrored ? build(peCols, 'pe', peCols.length - 1) : [],
         cells: mirrored ? [] : cols.map((c) => this.cell(c, row, vm, undefined, { itm: false, stale: false, acts: false })),
         spotAfter: vm.spotSlot !== null && row.strike === vm.spotSlot,
+        atm: vm.atmStrike != null && row.strike === vm.atmStrike,
       };
     });
   });
