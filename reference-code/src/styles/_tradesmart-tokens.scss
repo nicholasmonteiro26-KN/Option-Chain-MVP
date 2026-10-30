@@ -1,0 +1,52 @@
+// TradeSmart theme tokens (spec 5.3), read from web.tradesmartonline.in. Light is :root; dark follows the
+// app's body[color-theme="dark"] switch. Component styles use only these --ts-* tokens.
+:root {
+  --ts-font: 'Roboto', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --ts-bg: #ffffff;
+  --ts-bg2: #f8f8f8;
+  --ts-fg: #000000;
+  --ts-muted: #777777;
+  --ts-line: rgba(148, 148, 148, 0.3);
+  --ts-strike: #dddddd;
+  --ts-itm: #fff9ee;
+  --ts-blue: #3f71eb;
+  --ts-blue-soft: #ecf1fd;
+  --ts-green: #39b00e;
+  --ts-red: #e83937;
+  --ts-green-soft: #e8f6e2;
+  --ts-red-soft: #fde9e9;
+  --ts-bar-ce: rgba(232, 57, 55, 0.22);
+  --ts-bar-pe: rgba(57, 176, 14, 0.22);
+  --ts-bar-cum: rgba(63, 113, 235, 0.18);
+  // OI Sense: green, red, orange, cyan (GoCharting, spec 8)
+  --ts-on-accent: #ffffff;
+  --ts-shadow: rgba(0, 0, 0, 0.35);
+  --ts-warn-soft: #fff6e6;
+  --ts-warn: #a15c00;
+  --ts-sense-lb: #39b00e;
+  --ts-sense-sb: #e83937;
+  --ts-sense-sc: #c26a00;
+  --ts-sense-lu: #0a7f93;
+}
+
+body[color-theme='dark'] {
+  --ts-bg: #0a1222;
+  --ts-bg2: #151f35;
+  --ts-fg: #ffffff;
+  --ts-muted: #949494;
+  --ts-line: rgba(148, 148, 148, 0.2);
+  --ts-strike: #151f35;
+  --ts-itm: #20293f;
+  --ts-blue-soft: #233050;
+  --ts-green-soft: rgba(57, 176, 14, 0.2);
+  --ts-red-soft: rgba(232, 57, 55, 0.2);
+  --ts-bar-ce: rgba(232, 57, 55, 0.33);
+  --ts-bar-pe: rgba(57, 176, 14, 0.33);
+  --ts-bar-cum: rgba(63, 113, 235, 0.3);
+  --ts-warn-soft: #6d3d02;
+  --ts-warn: #f2b45a;
+  --ts-sense-sc: #f2a54a;
+  --ts-sense-lu: #4fc6d8;
+  --ts-shadow: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}

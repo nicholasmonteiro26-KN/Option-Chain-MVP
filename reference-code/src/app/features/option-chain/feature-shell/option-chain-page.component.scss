@@ -1,0 +1,29 @@
+:host {
+  display: block;
+  min-height: 100dvh;
+  color: var(--ts-fg);
+  background: var(--ts-bg);
+  font-family: var(--ts-font);
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 20;
+  margin: 0;
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--ts-fg);
+  color: var(--ts-bg);
+  font-size: 13px;
+  box-shadow: 0 10px 30px -10px var(--ts-shadow);
+}

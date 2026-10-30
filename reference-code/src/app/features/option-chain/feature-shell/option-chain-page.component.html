@@ -1,0 +1,77 @@
+<main class="page" aria-label="Option chain">
+  <oc-underlying-bar
+    [quick]="quick"
+    [selected]="selected()"
+    [quickPrices]="quickPrices()"
+    [ohlc]="ohlc()"
+    [lotSize]="lotSize()"
+    [ltp]="store.spot()"
+    [searchResults]="searchResults()"
+    [resultsFor]="resultsFor()"
+    (select)="onSelectUnderlying($event)"
+    (search)="onSearch($event)"
+  />
+
+  <oc-view-toolbar
+    [presetId]="presetId()"
+    [customEditorOpen]="showEditor()"
+    [strikeCount]="prefs().strikeCount"
+    (presetChange)="onPreset($event)"
+    (editColumns)="editorOpen.set(true)"
+    (strikeCountChange)="onStrikeCount($event)"
+    (exportCsv)="onCsv()"
+  />
+
+  @if (stripSelected(); as sel) {
+    <oc-expiry-strip
+      [expiries]="store.expiries()"
+      [selected]="sel"
+      [nowMs]="nowMs()"
+      [stats]="stats()"
+      [feedStatus]="store.feedStatus()"
+      [partial]="store.partialChain()"
+      (expiryChange)="onExpiry($event)"
+    />
+  }
+
+  <oc-status-banner [kind]="bannerKind()" [sym]="selected().sym" (retry)="retry()" />
+
+  @if (showEditor()) {
+    <oc-column-chooser
+      data-testid="custom-editor"
+      [columns]="customView().columns"
+      [presets]="prefs().customPresets"
+      [mode]="customView().mode"
+      (columnsChange)="onCustomColumns($event)"
+      (modeChange)="onCustomMode($event)"
+      (savePreset)="onSavePreset($event)"
+      (renamePreset)="onRenamePreset($event)"
+      (deletePreset)="onDeletePreset($event)"
+      (applyPreset)="onApplyPreset($event)"
+      (done)="editorOpen.set(false)"
+    />
+  }
+
+  <oc-chain-table
+    [vm]="tableVm()"
+    [spot]="store.spot() ?? 0"
+    [checked]="checked()"
+    [stale]="stale()"
+    [loading]="tableLoading()"
+    (trade)="onTrade($event)"
+    (toggleCheck)="onToggleCheck($event)"
+  />
+
+  <oc-footer-actions
+    [checkedCount]="checked().size"
+    [fwd]="footer().fwd"
+    [atm]="footer().atm"
+    [expiryLabel]="footer().expiry"
+    (addToWatchlist)="onAddToWatchlist()"
+    (addToBasket)="onAddToBasket()"
+  />
+</main>
+
+@if (statusLine(); as line) {
+  <p class="toast" role="status" data-testid="status-line">{{ line }}</p>
+}

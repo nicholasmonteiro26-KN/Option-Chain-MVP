@@ -1,0 +1,141 @@
+<title>Option Chain Build Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a build roadmap — summary, then 14 tasks grouped into 4 stages, then what the team receives and the decision needed. */
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --surface-2:#F8F8F8; --fg:#141922; --muted:#666e7a; --line:rgba(148,148,148,.3);
+  --blue:#3F71EB; --blue-soft:#ECF1FD; --green:#39B00E; --green-soft:#E8F6E2; --red:#E83937; --amber:#a15c00; --amber-soft:#fdf0dc;
+  --f-body:"Roboto","Segoe UI",system-ui,sans-serif; --f-mono:"Roboto Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0A1222; --surface:#151F35; --surface-2:#20293F; --fg:#ffffff; --muted:#a3a9b5; --line:rgba(148,148,148,.22);
+  --blue:#6f95f2; --blue-soft:#233050; --green:#4fc21f; --green-soft:rgba(57,176,14,.18); --red:#ff6b69; --amber:#f2b45a; --amber-soft:#33260f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0A1222; --surface:#151F35; --surface-2:#20293F; --fg:#ffffff; --muted:#a3a9b5; --line:rgba(148,148,148,.22);
+  --blue:#6f95f2; --blue-soft:#233050; --green:#4fc21f; --green-soft:rgba(57,176,14,.18); --red:#ff6b69; --amber:#f2b45a; --amber-soft:#33260f; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.55;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:32px 64px}
+.wrap{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:44px}
+h1,h2,h3{margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:clamp(26px,4vw,36px);font-weight:700;line-height:1.15}
+h2{font-size:21px;font-weight:700}
+h3{font-size:15px;font-weight:700}
+p{margin:0}
+.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:500}
+.lede{max-width:70ch;color:var(--muted);font-size:16px}
+section{display:flex;flex-direction:column;gap:16px;min-width:0}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.fact{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:2px}
+.fact .k{font-size:12px;color:var(--muted)}
+.fact .v{font-weight:700;font-size:18px}
+.fact .s{font-size:13px;color:var(--muted)}
+.stage{display:flex;flex-direction:column;gap:10px}
+.stage-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.stage-head .tag{font-size:12px;font-weight:500;border-radius:4px;padding:1px 8px;background:var(--blue-soft);color:var(--blue)}
+.tasks{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}
+.task{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.task .num{font-family:var(--f-mono);font-size:12px;color:var(--blue);font-weight:500}
+.task p{font-size:14px;color:var(--muted)}
+.task .test{font-size:13px;border-top:1px solid var(--line);padding-top:6px;color:var(--fg)}
+.task .test b{color:var(--green);font-weight:500}
+.risks{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.risk{background:var(--amber-soft);border-radius:10px;padding:12px 14px;font-size:14px;display:flex;flex-direction:column;gap:2px}
+.risk b{color:var(--amber)}
+.choice{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.opt{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:6px}
+.opt.rec{border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue)}
+.opt .badge{align-self:flex-start;font-size:11px;font-weight:700;border-radius:4px;padding:1px 7px;background:var(--blue);color:#fff}
+.opt p{font-size:14px;color:var(--muted)}
+ul.plain{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:0 4px;overflow-wrap:anywhere}
+footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:16px}
+</style>
+
+<div class="wrap">
+<header style="display:flex;flex-direction:column;gap:12px">
+  <span class="eyebrow">TradeSmart Options Desk · Sub-project 1 · Implementation plan</span>
+  <h1>Option Chain Build Plan</h1>
+  <p class="lede">How the approved design becomes working Angular code your tech team can lift into TradeSmart. The work is 14 tasks in 4 stages. Every task is written test-first, with expected values taken from the formulas research.</p>
+  <div class="facts">
+    <div class="fact"><span class="k">Tasks</span><span class="v">14</span><span class="s">each with its own tests</span></div>
+    <div class="fact"><span class="k">Stack</span><span class="v">Angular 22 · Ionic 9</span><span class="s">signals, zoneless, Vitest, Playwright</span></div>
+    <div class="fact"><span class="k">Runs without Kambala</span><span class="v">Mock feed</span><span class="s">open <code>?feed=mock</code> to demo</span></div>
+    <div class="fact"><span class="k">Hand-off</span><span class="v">Code + prototype + README</span><span class="s">every integration point marked</span></div>
+  </div>
+</header>
+
+<section aria-labelledby="s1">
+  <div class="stage">
+    <div class="stage-head"><h2 id="s1">Stage 1 · The maths</h2><span class="tag">Tasks 1–6</span></div>
+    <p class="lede">A standalone calculation library with no Angular code, so it can later move to a TradeSmart server unchanged.</p>
+    <div class="tasks">
+      <div class="task"><span class="num">Task 1</span><h3>Project setup</h3><p>New Angular 22 workspace with Ionic, Vitest and Playwright.</p><div class="test">Test: <b>a smoke test runs</b></div></div>
+      <div class="task"><span class="num">Task 2</span><h3>Option pricing and Greeks</h3><p>Black-76 prices, delta, gamma, theta, vega, ITM probability.</p><div class="test">Test: <b>matches textbook values to 8 decimals</b></div></div>
+      <div class="task"><span class="num">Task 3</span><h3>Implied volatility</h3><p>Solves IV from each option's price. Picks bid/ask mid or last price. Never invents a number.</p><div class="test">Test: <b>14 known IVs, plus "–" cases like price below intrinsic</b></div></div>
+      <div class="task"><span class="num">Task 4</span><h3>Expiry time and forward price</h3><p>Days-to-expiry label ("5d"), time to 15:30 IST, forward price from call and put prices.</p><div class="test">Test: <b>29 Oct 10:00 → 3 Nov shows "5d"</b></div></div>
+      <div class="task"><span class="num">Task 5</span><h3>Chain totals</h3><p>Max Pain, PCR, OI change and OI Sense, straddle and decay, GEX.</p><div class="test">Test: <b>sample chain gives Max Pain 25000, PCR 1.04</b></div></div>
+      <div class="task"><span class="num">Task 6</span><h3>Whole-chain calculation</h3><p>Runs everything for all strikes in one call.</p><div class="test">Test: <b>150 strikes in under 50 ms, no errors on expiry day</b></div></div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="s2">
+  <div class="stage">
+    <div class="stage-head"><h2 id="s2">Stage 2 · Live data</h2><span class="tag">Tasks 7–9</span></div>
+    <p class="lede">Connecting to Kambala, keeping prices current, and running the maths in the background.</p>
+    <div class="tasks">
+      <div class="task"><span class="num">Task 7</span><h3>Kambala connection</h3><p>REST calls, the live WebSocket feed with automatic reconnect, and a mock feed for demos.</p><div class="test">Test: <b>a price-only update never wipes OI or bid/ask</b></div></div>
+      <div class="task"><span class="num">Task 8</span><h3>Expiries, contracts and live store</h3><p>Loads expiries and strikes, reads lot size per contract, subscribes to the whole chain.</p><div class="test">Test: <b>fast expiry switching never shows the wrong strikes; SENSEX Jan-27 lot is 25</b></div></div>
+      <div class="task"><span class="num">Task 9</span><h3>Background calculation</h3><p>Recalculates once a second in a worker, skips if busy, recovers from a crash.</p><div class="test">Test: <b>no pile-up of slow calculations</b></div></div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="s3">
+  <div class="stage">
+    <div class="stage-head"><h2 id="s3">Stage 3 · The screen</h2><span class="tag">Tasks 10–13</span></div>
+    <p class="lede">Everything you approved in the mockup, built as Angular components in TradeSmart's colours.</p>
+    <div class="tasks">
+      <div class="task"><span class="num">Task 10</span><h3>Views, columns and saved settings</h3><p>The 8 views, strike count, CSV export, saved preferences, and the steady spot-line placement.</p><div class="test">Test: <b>spot wobbling around a strike does not move the line</b></div></div>
+      <div class="task"><span class="num">Task 11</span><h3>The chain table</h3><p>Calls, centre strike, puts; Dhan-style spot line; red CE and green PE OI bars; hover Buy and Sell.</p><div class="test">Test: <b>clicking B on 22900 CE opens the order with lot 65</b></div></div>
+      <div class="task"><span class="num">Task 12</span><h3>Header, toolbar and banners</h3><p>NIFTY and SENSEX quick buttons, search, OHLC, expiry chips, Custom editor, status messages.</p><div class="test">Test: <b>Edit columns appears only in Custom</b></div></div>
+      <div class="task"><span class="num">Task 13</span><h3>The page in its own tab</h3><p>The <code>/option-chain</code> page, the new-tab launcher, end-to-end and speed tests.</p><div class="test">Test: <b>all strikes at 20 ticks/s stays smooth (50 fps)</b></div></div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="s4">
+  <div class="stage">
+    <div class="stage-head"><h2 id="s4">Stage 4 · Hand-off</h2><span class="tag">Task 14</span></div>
+    <div class="tasks">
+      <div class="task"><span class="num">Task 14</span><h3>Prototype and README</h3><p>A standalone clickable prototype, plus a README listing how to run it, the folder map, every integration point and the open questions.</p><div class="test">Test: <b>every integration point in the code is listed in the README</b></div></div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="risk-h">
+  <h2 id="risk-h">Extra checks built into the plan</h2>
+  <p class="lede">Situations the spec doesn't spell out but traders will hit. Each has its own test.</p>
+  <div class="risks">
+    <div class="risk"><b>Partial price updates</b>An update with only the price must not reset OI or bid/ask.</div>
+    <div class="risk"><b>Illiquid strikes</b>No quote means IV shows "–", but OI still counts in PCR and Max Pain.</div>
+    <div class="risk"><b>Fast expiry switching</b>Never shows one expiry's strikes under another's label.</div>
+    <div class="risk"><b>Expiry day after 15:30</b>Shows "expired", never huge or broken Greeks.</div>
+    <div class="risk"><b>Spot sitting on a strike</b>The spot line stays put instead of flickering.</div>
+  </div>
+</section>
+
+<section aria-labelledby="run-h">
+  <h2 id="run-h">How should I build it?</h2>
+  <div class="choice">
+    <div class="opt rec"><span class="badge">Recommended</span><h3>Task-by-task with a reviewer</h3><p>A fresh agent builds each task, and a separate reviewer checks it before the next one starts, then a final review of everything. Slower and uses more tokens, but each task is checked independently. That matters here because later tasks rely on the exact names and numbers from earlier ones.</p></div>
+    <div class="opt"><h3>All in this session</h3><p>I build every task myself, then one reviewer checks the whole result at the end. Faster and cheaper, but mistakes are only caught at the end.</p></div>
+  </div>
+</section>
+
+<footer>Full plan for the tech team: <code>docs/superpowers/plans/2026-10-29-option-chain-core.md</code>. Design and spec: <code>docs/superpowers/specs/2026-10-29-option-chain-core-design.md</code>. The code will be created in <code>Option chain MVP/reference-code/</code>.</footer>
+</div>

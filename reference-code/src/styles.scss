@@ -1,0 +1,8 @@
+@use './styles/tradesmart-tokens';
+
+body {
+  margin: 0;
+  background: var(--ts-bg);
+  color: var(--ts-fg);
+  font-family: var(--ts-font);
+}

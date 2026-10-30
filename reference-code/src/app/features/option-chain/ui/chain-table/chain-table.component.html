@@ -1,0 +1,117 @@
+<div class="tbl-wrap" data-testid="chain-table">
+  <table class="oc">
+    <thead #head>
+      @if (mirrored()) {
+        <tr>
+          <th class="side-h" [attr.colspan]="ceCols().length + 1">Calls</th>
+          <th class="k"></th>
+          <th class="side-h" [attr.colspan]="peCols().length + 1">Puts</th>
+        </tr>
+        <tr>
+          <th></th>
+          @for (c of ceCols(); track c.id) { <th [attr.title]="c.title ?? null">{{ c.label }}</th> }
+          <th class="k">Strike</th>
+          @for (c of peCols(); track c.id) { <th [attr.title]="c.title ?? null">{{ c.label }}</th> }
+          <th></th>
+        </tr>
+      } @else {
+        <tr>
+          <th class="k">Strike</th>
+          @for (c of ceCols(); track c.id) { <th [attr.title]="c.title ?? null">{{ c.label }}</th> }
+        </tr>
+      }
+    </thead>
+
+    <tbody>
+      @if (loading()) {
+        @for (i of skeleton(); track i) {
+          <tr class="skel">
+            @if (mirrored()) {
+              <td class="chk"></td>
+              @for (id of skeletonCols(); track id) { <td></td> }
+              <td class="k"></td>
+              @for (id of skeletonCols(); track id) { <td></td> }
+              <td class="chk"></td>
+            } @else {
+              <td class="k"></td>
+              @for (id of skeletonCols(); track id) { <td></td> }
+            }
+          </tr>
+        }
+      } @else {
+        @for (row of rows(); track row.strike) {
+          <tr>
+            @if (mirrored()) {
+              <td class="chk">
+                @if (row.ceToken; as t) {
+                  <input type="checkbox" [checked]="checked().has(t)" (change)="toggleCheck.emit(t)"
+                    [attr.aria-label]="'Select ' + row.strike + ' CE'">
+                }
+              </td>
+              @for (c of row.ce; track c.id) {
+                <ng-container *ngTemplateOutlet="cellTpl; context: { $implicit: c, side: 'ce' }" />
+              }
+              <td class="k">{{ row.strike }}</td>
+              @for (c of row.pe; track c.id) {
+                <ng-container *ngTemplateOutlet="cellTpl; context: { $implicit: c, side: 'pe' }" />
+              }
+              <td class="chk">
+                @if (row.peToken; as t) {
+                  <input type="checkbox" [checked]="checked().has(t)" (change)="toggleCheck.emit(t)"
+                    [attr.aria-label]="'Select ' + row.strike + ' PE'">
+                }
+              </td>
+            } @else {
+              <td class="k">{{ row.strike }}</td>
+              @for (c of row.cells; track c.id) {
+                <ng-container *ngTemplateOutlet="cellTpl; context: { $implicit: c, side: '' }" />
+              }
+            }
+          </tr>
+          @if (row.spotAfter) {
+            <tr class="spot" data-testid="spot-row">
+              @if (mirrored()) {
+                <td [attr.colspan]="ceCols().length + 1"></td>
+                <td><span class="pill">{{ spotLabel() }}</span></td>
+                <td [attr.colspan]="peCols().length + 1"></td>
+              } @else {
+                <td><span class="pill">{{ spotLabel() }}</span></td>
+                <td [attr.colspan]="ceCols().length"></td>
+              }
+            </tr>
+          }
+        }
+      }
+    </tbody>
+
+    @if (!loading()) {
+      <tfoot #foot>
+        <tr>
+          @if (mirrored()) {
+            <td></td>
+            @for (s of sums().ce; track s.id) { <td>{{ s.text }}</td> }
+            <td class="k">Σ</td>
+            @for (s of sums().pe; track s.id) { <td>{{ s.text }}</td> }
+            <td></td>
+          } @else {
+            <td class="k">Σ</td>
+            @for (s of sums().total; track s.id) { <td>{{ s.text }}</td> }
+          }
+        </tr>
+      </tfoot>
+    }
+  </table>
+</div>
+
+<ng-template #cellTpl let-c let-side="side">
+  <td [class]="c.cls" [style.background-size]="c.bar" [attr.title]="c.title" [ocFlash]="c.flash">
+    @if (c.trade) {
+      <span class="acts" [class.ce]="side === 'ce'" [class.pe]="side === 'pe'">
+        <button type="button" class="b" [attr.aria-label]="c.trade.label.replace('%', 'Buy')" (click)="emitTrade(c.trade, 'BUY')">B</button>
+        <button type="button" class="s" [attr.aria-label]="c.trade.label.replace('%', 'Sell')" (click)="emitTrade(c.trade, 'SELL')">S</button>
+      </span>
+    }
+    {{ c.text }}
+    @if (c.sub) { <span [class]="'sub ' + c.sub.cls">{{ c.sub.text }}</span> }
+  </td>
+</ng-template>

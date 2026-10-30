@@ -1,0 +1,176 @@
+:host {
+  display: block;
+  min-width: 0;
+  color: var(--ts-fg);
+  background: var(--ts-bg);
+  font-family: var(--ts-font);
+}
+
+.tbl-wrap {
+  overflow: auto;
+  max-height: 560px;
+  position: relative;
+}
+
+table.oc {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 12.5px;
+  font-family: var(--ts-font);
+  font-variant-numeric: tabular-nums;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--ts-bg2);
+  color: var(--ts-muted);
+  font-weight: 600;
+  font-size: 11.5px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ts-line);
+  white-space: nowrap;
+  text-align: right;
+}
+th.side-h {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+thead tr:nth-child(2) th { top: var(--head1-h, 31px); }
+// Strike mode has a single header row.
+thead tr:only-child th { top: 0; }
+
+td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--ts-line);
+  text-align: right;
+  white-space: nowrap;
+}
+// Only cells with an absolutely positioned child are positioned: a positioned element gets its own paint layer, and
+// ~3000 of them (every cell of a 200-contract chain) made each repaint after a tick noticeably slower.
+td.acts-host, tr.skel td { position: relative; }
+td.k, th.k {
+  text-align: center;
+  background: var(--ts-strike);
+  font-weight: 600;
+  color: var(--ts-fg);
+  border-left: 1px solid var(--ts-line);
+  border-right: 1px solid var(--ts-line);
+}
+td.itm { background: var(--ts-itm); }
+td.ltp { font-weight: 500; }
+td.chk { width: 28px; text-align: center; padding: 0 4px; }
+td.chk input { margin: 0; cursor: pointer; }
+
+.sub { display: block; font-size: 10.5px; }
+.pos { color: var(--ts-green); }
+.neg { color: var(--ts-red); }
+
+td.low-conf { font-style: italic; }
+td.stale { opacity: 0.55; }
+
+.sense { font-size: 11.5px; font-weight: 600; }
+.s-lb { color: var(--ts-sense-lb); }
+.s-sb { color: var(--ts-sense-sb); }
+.s-sc { color: var(--ts-sense-sc); }
+.s-lu { color: var(--ts-sense-lu); }
+
+// OI bars
+td.bar { background-repeat: no-repeat; }
+td.bar.ce {
+  background-image: linear-gradient(to left, var(--ts-bar-ce), var(--ts-bar-ce));
+  background-position: right center;
+}
+td.bar.pe {
+  background-image: linear-gradient(to right, var(--ts-bar-pe), var(--ts-bar-pe));
+  background-position: left center;
+}
+td.bar.cum {
+  background-image: linear-gradient(to right, var(--ts-bar-cum), var(--ts-bar-cum));
+  background-position: left center;
+}
+
+// Hover Buy / Sell
+.acts {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  opacity: 0;
+  pointer-events: none;
+  gap: 3px;
+  &.ce { left: 6px; }
+  &.pe { right: 6px; }
+  button {
+    font: 600 10.5px var(--ts-font);
+    border: 0;
+    border-radius: 4px;
+    padding: 2px 7px;
+    cursor: pointer;
+    color: var(--ts-on-accent);
+  }
+  .b { background: var(--ts-blue); }
+  .s { background: var(--ts-red); }
+}
+tr:hover .acts,
+tr:focus-within .acts { opacity: 1; pointer-events: auto; }
+
+// Sigma row
+tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--ts-bg2);
+  font-weight: 600;
+  border-top: 1px solid var(--ts-line);
+  border-bottom: 0;
+  &.k { background: var(--ts-strike); }
+}
+
+// Spot line: sticks just inside the header / footer when scrolled out of view.
+tr.spot td {
+  position: sticky;
+  top: var(--head-h, 74px);
+  bottom: var(--foot-h, 12px);
+  z-index: 3;
+  height: 0;
+  padding: 0;
+  border: 0;
+  border-top: 1.5px dashed var(--ts-green);
+  background: transparent;
+}
+tr.spot .pill {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -50%);
+  background: var(--ts-green);
+  color: var(--ts-on-accent);
+  font: 700 12px var(--ts-font);
+  font-variant-numeric: tabular-nums;
+  padding: 3px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px -2px var(--ts-shadow);
+}
+
+// Skeleton rows
+tr.skel td { color: transparent; height: 31px; }
+tr.skel td:not(.chk)::after {
+  content: '';
+  position: absolute;
+  inset: 9px 10px;
+  border-radius: 4px;
+  background: var(--ts-line);
+}
+
+// Flash classes are added by FlashDirective, outside the template: the cell is tinted for at least 400 ms, and the
+// class is removed with the next render (the next tick flush). Deliberately not a CSS animation: animating background-color repaints every flashing cell on every frame,
+// and at 20 ticks/s on 200 contracts that took most of the main thread (36-44 % of frames over 20 ms). A held tint
+// costs no paint of its own: it starts and ends inside tick-flush frames.
+td.flash-up { background-color: var(--ts-green-soft); } // td.: beats td.itm (same specificity, later)
+td.flash-dn { background-color: var(--ts-red-soft); }

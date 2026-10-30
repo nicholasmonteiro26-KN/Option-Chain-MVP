@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.angular/
+test-results/
+playwright-report/
+.superpowers/
+reference/*.mp4
+
+# Vendor documentation (not for the repository)
+Kambala API Doc*
+reference/
