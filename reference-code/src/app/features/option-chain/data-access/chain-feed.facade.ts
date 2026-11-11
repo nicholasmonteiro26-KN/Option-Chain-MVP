@@ -67,6 +67,8 @@ export class ChainFeedFacade {
   private quickWanted = false;
   /** The quick keys currently held (subscribed) or to subscribe next. */
   private quickKeys: string[] = this.quickKeysSignal();
+  /** Strategy-leg feed keys currently subscribed through `holdLegKeys`. */
+  private heldLegKeys: ReadonlySet<string> = new Set();
 
   constructor() {
     const sub = this.transport.messages.subscribe((m) => {
@@ -106,7 +108,23 @@ export class ChainFeedFacade {
       this.spotWaiter?.(false);
       this.unsubscribeAll();
       this.unsubscribeQuick();
+      this.holdLegKeys([]);
     });
+  }
+
+  /**
+   * Holds the strategy legs' feed keys so their live price flows whatever chain is showing. Subscribes newly held
+   * keys and unsubscribes released ones; the transport ref-counts, so a key the chain also subscribes coexists.
+   * Untouched by `unsubscribeAll()` (underlying / expiry switches); released on destroy.
+   */
+  holdLegKeys(keys: string[]): void {
+    const next = new Set(keys);
+    const added = [...next].filter((k) => !this.heldLegKeys.has(k));
+    const removed = [...this.heldLegKeys].filter((k) => !next.has(k));
+    this.heldLegKeys = next;
+    this.store.setLegKeys(next);
+    if (removed.length > 0) this.transport.unsubscribe(removed);
+    if (added.length > 0) this.transport.subscribe(added);
   }
 
   /** Switches underlying: resubscribes its spot, loads expiries, waits for spot, then loads the chosen expiry. */

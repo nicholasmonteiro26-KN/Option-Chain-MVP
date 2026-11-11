@@ -15,6 +15,8 @@ import { QuickUnderlyingsService } from '../data-access/quick-underlyings.servic
 import { PrefsStore } from '../data-access/prefs.store';
 import { MockKambalaRestClient } from '../data-access/testing/mock-kambala-rest.client';
 import { MockMarket } from '../data-access/testing/mock-market';
+import { StrategyMarginService } from '../strategy/strategy-margin.service';
+import { StrategyStore } from '../strategy/strategy.store';
 import { environment } from '../../../../environments/environment';
 
 const currentSearch = (): string => (typeof window === 'undefined' ? '' : window.location.search);
@@ -74,12 +76,15 @@ export function provideOptionChain(): Provider[] {
     PrefsStore,
     InstrumentsService,
     MarketSessionService,
+    // The "Build your strategy" legs (per underlying, kept in sessionStorage per user) and their margin.
+    StrategyStore,
+    StrategyMarginService,
     // The simulated market trades around the clock; the real one follows exchange hours.
     { provide: MARKET_SESSION_RULE, useFactory: () => (inject(OPTION_CHAIN_MOCK_MODE) ? () => true : isNseFoSessionOpen) },
     { provide: TickBuffer, useFactory: () => new TickBuffer(inject(CHAIN_FEED_CLOCK)) },
     {
       provide: MockMarket,
-      useFactory: () => new MockMarket({ strikesPerChain: mockParam('mockStrikes', 35) }),
+      useFactory: () => new MockMarket({ strikesPerChain: mockParam('mockStrikes', 35), rollingExpiries: true }),
     },
     {
       provide: FEED_TRANSPORT,

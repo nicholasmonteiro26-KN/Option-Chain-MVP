@@ -1,6 +1,10 @@
+// The page fills the window and does not scroll: only the chain's rows do (as on TradeSmart), so the header,
+// toolbars and the Add to Watchlist / Basket buttons always stay in view. On a very short window the page itself
+// scrolls rather than squeezing the chain below its minimum height.
 :host {
   display: block;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: auto;
   color: var(--ts-fg);
   background: var(--ts-bg);
   font-family: var(--ts-font);
@@ -10,45 +14,38 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  height: 100%;
+
+  > * { flex: none; }
+  > oc-chain-table { flex: 1 1 0; min-height: 240px; }
 }
 
-.top {
+// The footer plus the "Build your strategy" pop-up, which floats 8px above the footer at the right, over the chain
+// (above its sticky header, below the status toast). Out of flow, so it never changes the page's height; the page
+// never scrolls for it (anything past the top is clipped, and it is capped to the window).
+.foot {
   position: relative;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 14px;
-  background: var(--ts-header-bg);
-  box-shadow: var(--ts-header-shadow);
 
-  h1 {
-    margin: 0 auto 0 0;
-    font-size: 15px;
-    font-weight: 600;
+  .strategy {
+    position: absolute;
+    right: 14px;
+    bottom: calc(100% + 8px);
+    z-index: 10;
+    max-width: calc(100% - 28px);
+    max-height: calc(100dvh - 120px);
+    overflow-y: auto;
+    border-radius: 8px;
   }
+}
 
-  .who {
-    font-size: 12.5px;
-    color: var(--ts-muted);
-  }
-
-  .logout {
-    min-height: 32px;
-    padding: 4px 12px;
-    font: inherit;
-    font-size: 13px;
-    border: 1px solid var(--ts-outline);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--ts-outline);
-    cursor: pointer;
-  }
-
-  .logout:focus-visible {
-    outline: 2px solid var(--ts-focus);
-    outline-offset: 2px;
-  }
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .toast {

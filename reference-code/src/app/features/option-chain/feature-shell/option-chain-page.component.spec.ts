@@ -5,7 +5,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ActivatedRoute, convertToParamMap, Router } from '@angular/router';
 import { analyzeChain } from '@option-analytics/analyze';
-import { Subject } from 'rxjs';
+import { merge, Subject } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ANALYTICS_POST_SCHEDULER, AnalyticsBridge, WORKER_FACTORY, WorkerLike } from '../analytics/analytics.bridge';
 import type { FromWorker, ToWorker } from '../analytics/protocol';
@@ -13,7 +13,7 @@ import { CHAIN_FEED_CLOCK, CHAIN_FEED_SCHEDULER } from '../data-access/chain-fee
 import { MockFeedTransport } from '../data-access/feed/mock-feed.transport';
 import { TickBuffer } from '../data-access/feed/tick-buffer';
 import { FEED_TRANSPORT, FeedTransport } from '../data-access/feed/transport';
-import { SessionExpiredError } from '../data-access/kambala/kambala.types';
+import { KambalaError, SessionExpiredError } from '../data-access/kambala/kambala.types';
 import { isNseFoSessionOpen, MARKET_SESSION_RULE } from '../data-access/market-session.service';
 import { OptionChainStore } from '../data-access/option-chain.store';
 import { AuthSessionService } from '../data-access/auth-session.service';
@@ -23,9 +23,12 @@ import { PREFS_STORAGE } from '../data-access/prefs.store';
 import { KambalaRestClient } from '../data-access/kambala/kambala-rest.client';
 import { MockKambalaRestClient } from '../data-access/testing/mock-kambala-rest.client';
 import { MockMarket } from '../data-access/testing/mock-market';
+import { InstrumentsService } from '../data-access/instruments.service';
+import { StrategyStore } from '../strategy/strategy.store';
 import { UnderlyingBarComponent } from '../ui/underlying-bar/underlying-bar.component';
-import { ContractPayload, OptionChainPageComponent } from './option-chain-page.component';
+import { BasketLegPayload, ContractPayload, OptionChainPageComponent } from './option-chain-page.component';
 import { OPTION_CHAIN_MOCK_MODE, OPTION_CHAIN_USER_ID, provideOptionChain } from './option-chain.providers';
+import { OPTION_CHAIN_ROUTES } from './option-chain.routes';
 
 /** 2026-10-29 11:30 IST. */
 const NOW = Date.UTC(2026, 9, 29, 6, 0, 0);
@@ -146,6 +149,9 @@ const url = () => (TestBed.inject(Location) as SpyLocation).urlChanges.at(-1) ??
 const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
 const q = (ctx: Ctx, sel: string) => ctx.el.querySelector<HTMLElement>(sel);
 
+// The strategy is kept in sessionStorage per user: start every test with none.
+afterEach(() => sessionStorage.clear());
+
 describe('OptionChainPageComponent', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -180,7 +186,10 @@ describe('OptionChainPageComponent', () => {
   it('selecting the 28 Jan 2027 SENSEX expiry shows Lot 25 and updates the URL', async () => {
     const ctx = await setup({ underlying: 'BSE:SENSEX' });
     expect(text(q(ctx, '.und-bar'))).toContain('Lot 20');
-    q(ctx, '[data-testid="expiry-2027-01-28"]')!.click();
+    // Beyond the 3 nearest, expiries are picked from the 'Next expiry' drop-down.
+    const more = q(ctx, '[data-testid="expiry-more"]') as HTMLSelectElement;
+    more.value = '2027-01-28';
+    more.dispatchEvent(new Event('change'));
     await ctx.stable();
     expect(ctx.store.selectedExpiry()?.iso).toBe('2027-01-28');
     expect(text(q(ctx, '.und-bar'))).toContain('Lot 25');
@@ -193,7 +202,8 @@ describe('OptionChainPageComponent', () => {
     const strip = text(q(ctx, 'oc-expiry-strip'));
     expect(strip).toMatch(/ATM IV\s*\d+\.\d\d/);
     expect(strip).toMatch(/Max Pain\s*[\d,]+/);
-    expect(text(q(ctx, 'oc-footer-actions'))).toMatch(/Fwd \d+\.\d · ATM \d+ · 03 Nov 2026/);
+    expect(text(q(ctx, '[data-testid="expiry-date"]'))).toBe('Expiry 03 Nov 2026');
+    expect(text(q(ctx, 'oc-footer-actions'))).not.toMatch(/Fwd|ATM/);
   });
 
   it('preset Greeks puts IV in the header and saves the preset', async () => {
@@ -286,13 +296,23 @@ describe('OptionChainPageComponent', () => {
     );
   });
 
+  it('chart buttons in mock mode describe the hand-off in the status line', async () => {
+    const ctx = await setup({});
+    ctx.el.querySelector<HTMLButtonElement>('table.oc .acts.ce .chart')!.click();
+    await ctx.stable();
+    expect(text(q(ctx, '[data-testid="status-line"]'))).toMatch(/^Opens the chart: NIFTY 03 Nov \d+ CE$/);
+    ctx.el.querySelector<HTMLButtonElement>('table.oc .acts.pe .adv')!.click();
+    await ctx.stable();
+    expect(text(q(ctx, '[data-testid="status-line"]'))).toMatch(/^Opens Advanced Chart: NIFTY 03 Nov \d+ PE$/);
+  });
+
   it('checkboxes count into the footer and Add to Basket reports in mock mode', async () => {
     const ctx = await setup({});
-    const boxes = ctx.el.querySelectorAll<HTMLInputElement>('table.oc td.chk input');
+    const boxes = ctx.el.querySelectorAll<HTMLInputElement>('table.oc input.cb');
     boxes[0]!.click();
     boxes[1]!.click();
     await ctx.stable();
-    expect(text(q(ctx, 'oc-footer-actions'))).toContain('Add to Basket (2)');
+    expect(text(q(ctx, 'oc-footer-actions'))).toContain('Add to Basket 2');
     const basket = [...ctx.el.querySelectorAll<HTMLButtonElement>('oc-footer-actions button')].find((x) => text(x).startsWith('Add to Basket'))!;
     basket.click();
     await ctx.stable();
@@ -376,10 +396,10 @@ describe('OptionChainPageComponent', () => {
     // Go back to side columns, then apply the saved view.
     [...ctx.el.querySelectorAll<HTMLButtonElement>('[data-testid="custom-editor"] button')].find((b) => text(b) === 'Side columns')!.click();
     await ctx.stable();
-    expect(text(q(ctx, 'table.oc thead'))).toContain('Calls');
+    expect(q(ctx, 'table.oc thead [data-testid="side-ce"]')).not.toBeNull();
     q(ctx, '[aria-label="Apply Straddles"]')!.click();
     await ctx.stable();
-    expect(text(q(ctx, 'table.oc thead'))).not.toContain('Calls');
+    expect(q(ctx, 'table.oc thead [data-testid="side-ce"]')).toBeNull();
     expect(text(q(ctx, 'table.oc thead'))).toContain('Straddle');
     const saved = JSON.parse(ctx.storage.get('ts.optionChain.prefs.v1:u1')!);
     expect(saved.custom).toEqual({ mode: 'strike', columns: ['straddle'] });
@@ -418,10 +438,11 @@ describe('OptionChainPageComponent', () => {
 
   // ---- market session (exchange hours, not the feed status) ----
 
-  it('after hours the banner says Market closed, one analysis still runs, and nothing is marked stale', async () => {
+  it('after hours the toolbar says Market closed (no banner row), one analysis still runs, and nothing is marked stale', async () => {
     const ctx = await setup({}, { now: Date.parse('2026-10-29T16:00:00+05:30') });
-    expect(ctx.transport.status()).toBe('open'); // the socket is up: the banner follows exchange hours
-    expect(text(q(ctx, '[data-testid="status-banner"]'))).toContain('Market closed');
+    expect(ctx.transport.status()).toBe('open'); // the socket is up: the notice follows exchange hours
+    expect(text(q(ctx, 'oc-view-toolbar [data-testid="market-notice"]'))).toContain('Market closed');
+    expect(q(ctx, '[data-testid="status-banner"]')).toBeNull();
     expect(ctx.store.analytics()).not.toBeNull();
     await ctx.advance(36_000);
     expect(ctx.el.querySelectorAll('table.oc td.stale')).toHaveLength(0);
@@ -458,16 +479,16 @@ describe('OptionChainPageComponent', () => {
     expect(a?.cumOi).toBeGreaterThan(0);
   });
 
-  it('the banner flips to Market closed on the 30 s session tick at 15:30 IST', async () => {
+  it('the notice flips to Market closed on the 30 s session tick at 15:30 IST', async () => {
     const ctx = await setup({}, { now: Date.parse('2026-10-29T15:29:40+05:30') });
-    expect(q(ctx, '[data-testid="status-banner"]')).toBeNull();
+    expect(q(ctx, '[data-testid="market-notice"]')).toBeNull();
     await ctx.advance(30_000);
-    expect(text(q(ctx, '[data-testid="status-banner"]'))).toContain('Market closed');
+    expect(text(q(ctx, '[data-testid="market-notice"]'))).toContain('Market closed');
   });
 
   it('a feed drop still shows Reconnecting after hours (reconnecting outranks closed)', async () => {
     const ctx = await setup({}, { now: Date.parse('2026-10-31T11:00:00+05:30') }); // Saturday
-    expect(text(q(ctx, '[data-testid="status-banner"]'))).toContain('Market closed');
+    expect(text(q(ctx, '[data-testid="market-notice"]'))).toContain('Market closed');
     ctx.transport.drop();
     await ctx.stable();
     expect(text(q(ctx, '[data-testid="status-banner"]'))).toContain('Reconnecting');
@@ -527,7 +548,7 @@ describe('OptionChainPageComponent', () => {
 
   it('watchlist / basket items carry exch and the raw token besides the feed key', async () => {
     const ctx = await setup({});
-    const boxes = ctx.el.querySelectorAll<HTMLInputElement>('table.oc td.chk input');
+    const boxes = ctx.el.querySelectorAll<HTMLInputElement>('table.oc input.cb');
     boxes[0]!.click();
     await ctx.stable();
     const items = (ctx.fixture.componentInstance as unknown as { checkedContracts(): ContractPayload[] }).checkedContracts();
@@ -537,6 +558,518 @@ describe('OptionChainPageComponent', () => {
     expect(item!.token).toBe(`NFO|${item!.rawToken}`);
     expect(item!.rawToken).not.toContain('|');
     expect(item!.tsym).toMatch(/^NIFTY/);
+  });
+});
+
+describe('OptionChainPageComponent: Build your strategy', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    TestBed.resetTestingModule();
+  });
+
+  const buildBtn = (ctx: Ctx) => q(ctx, 'oc-footer-actions button.strategy') as HTMLButtonElement;
+  const panel = (ctx: Ctx) => q(ctx, 'oc-strategy-panel');
+  const panelRows = (ctx: Ctx) => [...ctx.el.querySelectorAll('oc-strategy-panel tbody tr')];
+  const button = (ctx: Ctx, label: string | RegExp, scope = 'oc-strategy-panel') =>
+    [...ctx.el.querySelectorAll<HTMLButtonElement>(`${scope} button`)].find((b) =>
+      typeof label === 'string' ? text(b) === label : label.test(text(b)))!;
+  const callBoxes = (ctx: Ctx) => [...ctx.el.querySelectorAll<HTMLInputElement>('table.oc input.cb.ce')];
+  const putBoxes = (ctx: Ctx) => [...ctx.el.querySelectorAll<HTMLInputElement>('table.oc input.cb.pe')];
+  const open = async (ctx: Ctx) => {
+    buildBtn(ctx).click();
+    await ctx.stable();
+  };
+  /** The page's own copy of the real feature provider for a token (the real/mock factory, not the test's override). */
+  const realProvider = (token: unknown) =>
+    provideOptionChain().find((p) => typeof p === 'object' && p !== null && 'provide' in p && p.provide === token)!;
+  /** A transport whose messages also carry ticks the test injects (e.g. for a held leg off the visible chain). */
+  const withInjectedTicks = (inject: Subject<object>) => (t: MockFeedTransport): FeedTransport => ({
+    connect: () => t.connect(), close: () => t.close(), send: (m) => t.send(m),
+    subscribe: (k) => t.subscribe(k), unsubscribe: (k) => t.unsubscribe(k),
+    messages: merge(t.messages, inject), status: t.status, limitReached: t.limitReached,
+  });
+
+  it('ticking a call shows "Build your strategy 1"; opening it lists the leg; deleting the leg unticks the chain', async () => {
+    const ctx = await setup({});
+    expect(buildBtn(ctx).disabled).toBe(true);
+    const box = callBoxes(ctx)[3]!;
+    box.click();
+    await ctx.stable();
+    expect(text(buildBtn(ctx))).toBe('Build your strategy 1');
+    expect(buildBtn(ctx).getAttribute('aria-expanded')).toBe('false');
+    expect(panel(ctx)).toBeNull();
+
+    await open(ctx);
+    expect(buildBtn(ctx).getAttribute('aria-expanded')).toBe('true');
+    expect(panelRows(ctx)).toHaveLength(1);
+    expect(text(panelRows(ctx)[0])).toContain('CE');
+    expect(text(panel(ctx))).toContain('Your strategy · NIFTY');
+
+    ctx.el.querySelector<HTMLButtonElement>('oc-strategy-panel button[aria-label^="Remove "]')!.click();
+    await ctx.stable();
+    expect(box.checked).toBe(false);
+    expect(text(buildBtn(ctx))).toBe('Build your strategy 0');
+    expect(panel(ctx)).toBeNull(); // nothing left to show
+  });
+
+  it('the panel collapses from its own button and toggles from the footer button', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    await open(ctx);
+    expect(panel(ctx)).not.toBeNull();
+    q(ctx, 'oc-strategy-panel [aria-label="Collapse strategy"]')!.click();
+    await ctx.stable();
+    expect(panel(ctx)).toBeNull();
+    expect(buildBtn(ctx).getAttribute('aria-expanded')).toBe('false');
+    await open(ctx);
+    await open(ctx);
+    expect(panel(ctx)).toBeNull();
+  });
+
+  it('legs survive an underlying switch and come back', async () => {
+    const ctx = await setup({});
+    const token = callBoxes(ctx)[3]!.getAttribute('aria-label');
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    const legToken = [...ctx.get(StrategyStore).tokens()][0]!;
+
+    const quick = (sym: string) => [...ctx.el.querySelectorAll<HTMLButtonElement>('.qbtn')].find((b) => text(b).startsWith(sym))!;
+    quick('SENSEX').click();
+    await ctx.stable();
+    expect(ctx.store.underlying()?.sym).toBe('SENSEX');
+    expect(text(buildBtn(ctx))).toBe('Build your strategy 0');
+    expect(ctx.el.querySelectorAll('table.oc input.cb:checked')).toHaveLength(0);
+    expect(ctx.transport.subscribedKeys()).toContain(legToken); // still held for its live price
+
+    quick('NIFTY').click();
+    await ctx.stable();
+    expect(text(buildBtn(ctx))).toBe('Build your strategy 1');
+    const checked = [...ctx.el.querySelectorAll<HTMLInputElement>('table.oc input.cb:checked')];
+    expect(checked.map((b) => b.getAttribute('aria-label'))).toEqual([token]);
+  });
+
+  it('margin shows after 400 ms in mock mode', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    await open(ctx);
+    const margin = () => text(q(ctx, 'oc-strategy-panel .sum .v'));
+    expect(margin()).toMatch(/^₹ [\d,]+$/); // opening asks at once
+    putBoxes(ctx)[3]!.click(); // a change while open waits 400 ms
+    await ctx.stable();
+    expect(margin()).toBe('…');
+    await ctx.advance(399);
+    expect(margin()).toBe('…');
+    await ctx.advance(1);
+    expect(margin()).toMatch(/^₹ [\d,]+$/);
+    expect(margin()).not.toBe('₹ 0');
+  });
+
+  it('margin is asked only while the pop-up is open; opening asks at once', async () => {
+    const ctx = await setup({});
+    const ask = vi.spyOn(ctx.get(KambalaRestClient), 'getBasketMargin');
+    callBoxes(ctx)[3]!.click();
+    putBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    await ctx.advance(1000);
+    expect(ask).not.toHaveBeenCalled();
+    await open(ctx);
+    expect(ask).toHaveBeenCalledTimes(3); // combined + one per leg, no 400 ms wait
+    q(ctx, 'oc-strategy-panel [aria-label="Collapse strategy"]')!.click();
+    await ctx.stable();
+    putBoxes(ctx)[4]!.click();
+    await ctx.stable();
+    await ctx.advance(1000);
+    expect(ask).toHaveBeenCalledTimes(3);
+  });
+
+  it('Execute all → Place → each leg shows Placed with a MOCK order number; no real REST client in mock mode', async () => {
+    const realPlace = vi.spyOn(KambalaRestClient.prototype, 'placeOrder');
+    const realMargin = vi.spyOn(KambalaRestClient.prototype, 'getBasketMargin');
+    const ctx = await setup({}, { providers: [realProvider(KambalaRestClient)] });
+    expect(ctx.get(KambalaRestClient)).toBeInstanceOf(MockKambalaRestClient);
+    callBoxes(ctx)[3]!.click();
+    putBoxes(ctx)[5]!.click();
+    await ctx.stable();
+    await open(ctx);
+    await ctx.advance(400);
+
+    button(ctx, 'Execute all').click();
+    await ctx.stable();
+    button(ctx, 'Place 2 orders').click();
+    await ctx.stable();
+    const results = [...ctx.el.querySelectorAll('oc-strategy-panel .results li')].map(text);
+    expect(results).toHaveLength(2);
+    for (const r of results) expect(r).toMatch(/^Placed B .* · #MOCK\d{6}$/);
+    expect(realPlace).not.toHaveBeenCalled();
+    expect(realMargin).not.toHaveBeenCalled();
+  });
+
+  it('Execute never runs twice concurrently', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    callBoxes(ctx)[4]!.click();
+    await ctx.stable();
+    const place = vi.spyOn(ctx.get(KambalaRestClient), 'placeOrder');
+    const page = ctx.fixture.componentInstance as unknown as { onExecute(): Promise<void> };
+    await Promise.all([page.onExecute(), page.onExecute()]);
+    expect(place).toHaveBeenCalledTimes(2); // one per leg, not four
+  });
+
+  /** placeOrder answers only when the test says so: `answer(i, orderNo)`. */
+  const deferPlace = (ctx: Ctx) => {
+    const pending: ((orderNo: string) => void)[] = [];
+    const spy = vi.spyOn(ctx.get(KambalaRestClient), 'placeOrder')
+      .mockImplementation(() => new Promise<string>((r) => pending.push(r)));
+    return { spy, answer: async (i: number, orderNo: string) => { pending[i]!(orderNo); await ctx.stable(); } };
+  };
+  const page = (ctx: Ctx) => ctx.fixture.componentInstance as unknown as { onExecute(): Promise<void> };
+
+  it('while orders are being placed, ticks and underlying / expiry switches are refused', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    putBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    const place = deferPlace(ctx);
+    await open(ctx);
+    button(ctx, 'Execute all').click();
+    await ctx.stable();
+    button(ctx, 'Place 2 orders').click();
+    await ctx.stable();
+    expect(place.spy).toHaveBeenCalledTimes(1);
+
+    const sensex = [...ctx.el.querySelectorAll<HTMLButtonElement>('.qbtn')].find((b) => text(b).startsWith('SENSEX'))!;
+    sensex.click();
+    await ctx.stable();
+    expect(ctx.store.underlying()?.sym).toBe('NIFTY');
+    expect(text(q(ctx, '[data-testid="status-line"]'))).toBe('Orders are being placed…');
+    q(ctx, '[data-testid="expiry-2026-11-10"]')!.click();
+    await ctx.stable();
+    expect(ctx.store.selectedExpiry()?.iso).toBe('2026-11-03');
+    callBoxes(ctx)[3]!.click(); // untick a leg being placed
+    callBoxes(ctx)[5]!.click(); // tick a new one
+    await ctx.stable();
+    expect(callBoxes(ctx)[3]!.checked).toBe(true);
+    expect(callBoxes(ctx)[5]!.checked).toBe(false);
+    expect(ctx.get(StrategyStore).current().legs).toHaveLength(2);
+
+    await place.answer(0, 'MOCK1');
+    await place.answer(1, 'MOCK2');
+    const results = [...ctx.el.querySelectorAll('oc-strategy-panel .results li')].map(text);
+    expect(results).toEqual([expect.stringMatching(/^Placed B .*#MOCK1$/), expect.stringMatching(/^Placed B .*#MOCK2$/)]);
+    sensex.click(); // free again
+    await ctx.stable();
+    expect(ctx.store.underlying()?.sym).toBe('SENSEX');
+  });
+
+  it('results land on the strategy that was placed, even if another one became active meanwhile', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    const store = ctx.get(StrategyStore);
+    const nifty = store.activeKey();
+    const place = deferPlace(ctx);
+    const run = page(ctx).onExecute();
+    store.setUnderlying('BSE|1');
+    await place.answer(0, 'MOCK9');
+    await run;
+    expect(store.current().legs).toEqual([]);
+    store.setUnderlying(nifty);
+    expect(store.current().legs[0]!.result).toEqual({ status: 'placed', orderNo: 'MOCK9' });
+  });
+
+  it('leaving the page mid-run sends no further leg', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    callBoxes(ctx)[4]!.click();
+    await ctx.stable();
+    const place = deferPlace(ctx);
+    const run = page(ctx).onExecute();
+    await ctx.stable();
+    expect(place.spy).toHaveBeenCalledTimes(1);
+    ctx.fixture.destroy();
+    await place.answer(0, 'MOCK1');
+    await run;
+    expect(place.spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a leg swapped to another expiry takes its price from the first tick; Execute all waits until then', async () => {
+    const queued: object[] = [];
+    let hold: (m: { e?: string; tk?: string }) => boolean = () => false;
+    const out = new Subject<object>();
+    const ctx = await setup({}, {
+      wrapTransport: (t) => {
+        t.messages.subscribe((m) => (hold(m as { e?: string; tk?: string }) ? queued.push(m) : out.next(m)));
+        return { ...withInjectedTicks(new Subject())(t), messages: out.asObservable() };
+      },
+    });
+    // Hold every option message for a contract off the visible chain (the swapped leg's ack and ticks).
+    hold = (m) => m.e === 'NFO' && !!m.tk && !ctx.store.quotes().has(`NFO|${m.tk}`);
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    await open(ctx);
+    const expirySelect = ctx.el.querySelector<HTMLSelectElement>('oc-strategy-panel select[aria-label^="Expiry"]')!;
+    expirySelect.value = '2026-11-10';
+    expirySelect.dispatchEvent(new Event('change'));
+    await ctx.stable();
+    const leg = () => ctx.get(StrategyStore).current().legs[0]!;
+    expect(leg().expiryIso).toBe('2026-11-10');
+    expect(leg().price).toBe(0);
+    expect(button(ctx, 'Execute all').disabled).toBe(true);
+    expect(text(panel(ctx))).toContain('Waiting for a price');
+
+    expect(queued.length).toBeGreaterThan(0);
+    hold = () => false;
+    for (const m of queued.splice(0)) out.next(m);
+    await ctx.stable();
+    const lp = ctx.store.legPrices().get(leg().token)!;
+    expect(lp).toBeGreaterThan(0);
+    expect(leg().price).toBe(lp);
+    expect(button(ctx, 'Execute all').disabled).toBe(false);
+    expect(text(panel(ctx))).not.toContain('Waiting for a price');
+  });
+
+  it('after a partial run (buy placed, sell rejected), Back → Execute all sends only the sell again', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    putBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    expect(ctx.get(StrategyStore).current().legs[0]!.tickSize).toBe(0.05); // from the chain contract
+    const place = vi.spyOn(ctx.get(KambalaRestClient), 'placeOrder').mockImplementation(async (o) => {
+      if (o.trantype === 'S') throw new KambalaError('RMS: insufficient margin');
+      return 'MOCK1';
+    });
+    await open(ctx);
+    ctx.el.querySelectorAll<HTMLButtonElement>('oc-strategy-panel button.bs')[1]!.click(); // second leg → Sell
+    await ctx.stable();
+    button(ctx, 'Execute all').click();
+    await ctx.stable();
+    button(ctx, 'Place 2 orders').click();
+    await ctx.stable();
+    expect(place).toHaveBeenCalledTimes(2);
+    button(ctx, 'Back').click();
+    await ctx.stable();
+    expect(text(panelRows(ctx)[0])).toContain('Placed #MOCK1');
+    expect(text(panelRows(ctx)[1])).toContain('Rejected: RMS: insufficient margin');
+
+    place.mockResolvedValue('MOCK2');
+    button(ctx, 'Execute all').click();
+    await ctx.stable();
+    expect(ctx.el.querySelectorAll('oc-strategy-panel .confirm li')).toHaveLength(1);
+    button(ctx, 'Place 1 order').click();
+    await ctx.stable();
+    expect(place).toHaveBeenCalledTimes(3);
+    expect(place.mock.calls[2]![0].trantype).toBe('S');
+  });
+
+  it('while placing, the page warns on unload and refuses to be left', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    const comp = ctx.fixture.componentInstance as unknown as { canLeave(): boolean };
+    const unload = () => {
+      const e = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    expect(unload()).toBe(false);
+    expect(comp.canLeave()).toBe(true);
+    const place = deferPlace(ctx);
+    const run = page(ctx).onExecute();
+    expect(unload()).toBe(true);
+    expect(comp.canLeave()).toBe(false);
+    await ctx.stable();
+    expect(text(q(ctx, '[data-testid="status-line"]'))).toBe('Orders are being placed…');
+    await place.answer(0, 'MOCK1');
+    await run;
+    expect(unload()).toBe(false);
+    expect(comp.canLeave()).toBe(true);
+    ctx.fixture.destroy();
+    expect(unload()).toBe(false);
+  });
+
+  it('the route asks the page before leaving it (in-app navigation is refused while placing)', () => {
+    const guard = OPTION_CHAIN_ROUTES[0]!.canDeactivate![0] as unknown as (c: { canLeave(): boolean }) => boolean;
+    expect(guard({ canLeave: () => false })).toBe(false);
+    expect(guard({ canLeave: () => true })).toBe(true);
+  });
+
+  it('removing the last leg closes the pop-up and puts focus on the chain', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    await open(ctx);
+    const remove = ctx.el.querySelector<HTMLButtonElement>('oc-strategy-panel button[aria-label^="Remove "]')!;
+    remove.focus();
+    remove.click();
+    await ctx.stable();
+    expect(panel(ctx)).toBeNull();
+    expect(document.activeElement).toBe(q(ctx, 'oc-chain-table .tbl-wrap'));
+  });
+
+  it('a rejected leg shows its reason', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    vi.spyOn(ctx.get(KambalaRestClient), 'placeOrder').mockRejectedValue(new Error('timeout'));
+    await open(ctx);
+    button(ctx, 'Execute all').click();
+    await ctx.stable();
+    button(ctx, 'Place 1 order').click();
+    await ctx.stable();
+    expect(text(q(ctx, 'oc-strategy-panel .results li'))).toContain(
+      'Rejected B',
+    );
+    expect(text(q(ctx, 'oc-strategy-panel .results li'))).toContain(
+      'Could not place the order. Check the order book before retrying.',
+    );
+  });
+
+  it('Execute all is off while the market is closed', async () => {
+    const ctx = await setup({}, { now: Date.parse('2026-10-29T16:00:00+05:30') });
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    await open(ctx);
+    expect(button(ctx, 'Execute all').disabled).toBe(true);
+    expect(text(panel(ctx))).toContain('Market closed');
+  });
+
+  it('a held leg from another expiry keeps updating its live price after switching expiry', async () => {
+    const ticks = new Subject<object>();
+    const ctx = await setup({}, { wrapTransport: withInjectedTicks(ticks) });
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    const legToken = [...ctx.get(StrategyStore).tokens()][0]!;
+    q(ctx, '[data-testid="expiry-2026-11-10"]')!.click();
+    await ctx.stable();
+    expect(ctx.store.selectedExpiry()?.iso).toBe('2026-11-10');
+    expect(ctx.store.quotes().has(legToken)).toBe(false); // off the visible chain now
+    expect(ctx.transport.subscribedKeys()).toContain(legToken);
+
+    const [e, tk] = legToken.split('|');
+    ticks.next({ t: 'tf', e, tk, lp: '123.45' });
+    await ctx.stable();
+    await open(ctx);
+    expect(text(panelRows(ctx)[0])).toContain('Live 123.45');
+    ticks.next({ t: 'tf', e, tk, lp: '124.10' });
+    await ctx.stable();
+    expect(text(panelRows(ctx)[0])).toContain('Live 124.10');
+  });
+
+  it('an 11th tick is refused with "A strategy holds up to 10 legs" and stays unticked', async () => {
+    const ctx = await setup({});
+    const boxes = [...callBoxes(ctx), ...putBoxes(ctx)];
+    for (const b of boxes.slice(0, 10)) b.click();
+    await ctx.stable();
+    expect(text(buildBtn(ctx))).toBe('Build your strategy 10');
+    boxes[10]!.click();
+    await ctx.stable();
+    expect(text(q(ctx, '[data-testid="status-line"]'))).toBe('A strategy holds up to 10 legs');
+    expect(boxes[10]!.checked).toBe(false);
+    expect(text(buildBtn(ctx))).toBe('Build your strategy 10');
+  });
+
+  it('switching a leg to a contract already in the strategy says "Already in your strategy"', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    putBoxes(ctx)[3]!.click(); // same strike, PE
+    await ctx.stable();
+    await open(ctx);
+    ctx.el.querySelector<HTMLButtonElement>('oc-strategy-panel button.type.ce')!.click();
+    await ctx.stable();
+    expect(text(q(ctx, '[data-testid="status-line"]'))).toBe('Already in your strategy');
+    expect(ctx.get(StrategyStore).current().legs.map((l) => l.type)).toEqual(['CE', 'PE']);
+  });
+
+  it('switching a leg to PE moves the tick; switching its expiry loads that chain for the strike picker', async () => {
+    const ctx = await setup({});
+    const instruments = ctx.get(InstrumentsService);
+    const load = vi.spyOn(instruments, 'loadChain');
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    await open(ctx);
+    ctx.el.querySelector<HTMLButtonElement>('oc-strategy-panel button.type.ce')!.click();
+    await ctx.stable();
+    expect(putBoxes(ctx)[3]!.checked).toBe(true);
+    expect(callBoxes(ctx)[3]!.checked).toBe(false);
+
+    const strike = ctx.get(StrategyStore).current().legs[0]!.strike;
+    const expirySelect = ctx.el.querySelector<HTMLSelectElement>('oc-strategy-panel select[aria-label^="Expiry"]')!;
+    expirySelect.value = '2026-11-10';
+    expirySelect.dispatchEvent(new Event('change'));
+    await ctx.stable();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(load.mock.calls[0]![1].iso).toBe('2026-11-10');
+    expect(load.mock.calls[0]![3]).toBe(40);
+    const leg = ctx.get(StrategyStore).current().legs[0]!;
+    expect(leg).toMatchObject({ expiryIso: '2026-11-10', strike, type: 'PE' });
+    expect(putBoxes(ctx)[3]!.checked).toBe(false); // the visible chain is still 03 Nov
+    const strikeSelect = ctx.el.querySelector<HTMLSelectElement>('oc-strategy-panel select[aria-label^="Strike"]')!;
+    expect(strikeSelect.disabled).toBe(false);
+    expect(strikeSelect.options.length).toBeGreaterThan(1);
+    // Picking the same expiry again uses the cached chain.
+    expirySelect.value = '2026-11-03';
+    expirySelect.dispatchEvent(new Event('change'));
+    await ctx.stable();
+    expirySelect.value = '2026-11-10';
+    expirySelect.dispatchEvent(new Event('change'));
+    await ctx.stable();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('Save to basket in mock mode describes the hand-off', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    putBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    await open(ctx);
+    button(ctx, 'Save to basket').click();
+    await ctx.stable();
+    expect(text(q(ctx, '[data-testid="status-line"]'))).toBe('Saves 2 legs to your basket, as today.');
+
+    // The live hand-off payload (BasketService.add): raw token, quantity in units, price 0 for a market order.
+    const store = ctx.get(StrategyStore);
+    const [ce, pe] = store.current().legs;
+    store.setLotMultiplier(2);
+    store.update(pe!.id, { side: 'S', priceType: 'MKT' });
+    store.update(ce!.id, { included: false });
+    const items = (ctx.fixture.componentInstance as unknown as { basketLegs(): BasketLegPayload[] }).basketLegs();
+    expect(items).toEqual([{
+      exch: 'NFO', token: pe!.token.split('|')[1], tsym: pe!.tsym, side: 'S', qty: 2 * 65, price: 0, priceType: 'MKT', product: 'I',
+    }]);
+  });
+
+  it('Add to Watchlist / Basket work on the legs (tsym from the leg)', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    await ctx.stable();
+    const items = (ctx.fixture.componentInstance as unknown as { checkedContracts(): ContractPayload[] }).checkedContracts();
+    const leg = ctx.get(StrategyStore).current().legs[0]!;
+    expect(items).toEqual([{ token: leg.token, exch: 'NFO', rawToken: leg.token.split('|')[1], tsym: leg.tsym }]);
+    button(ctx, /^Add to Watchlist/, 'oc-footer-actions').click();
+    await ctx.stable();
+    expect(text(q(ctx, '[data-testid="status-line"]'))).toBe('Adds 1 selected contract to your watchlist, as today.');
+  });
+
+  const fakeLiveAuth = () =>
+    ({ logout: vi.fn(), session: () => ({ uid: 'TESTUID', actid: 'A', accessToken: 'fake' }), norenConfig: vi.fn() });
+
+  it('a session expiry mid-run sends no further leg (the page is leaving for the login)', async () => {
+    const auth = fakeLiveAuth();
+    const ctx = await setup({}, { mock: false, providers: [{ provide: AuthSessionService, useValue: auth }] });
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    callBoxes(ctx)[3]!.click();
+    callBoxes(ctx)[4]!.click();
+    await ctx.stable();
+    const place = deferPlace(ctx);
+    const run = page(ctx).onExecute();
+    ctx.transport.expireSession();
+    await ctx.stable();
+    expect(auth.logout).toHaveBeenCalled();
+    await place.answer(0, 'MOCK1');
+    await run;
+    expect(place.spy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -674,18 +1207,13 @@ describe('OptionChainPageComponent with live data (login session, index tokens)'
     expect(q(ctx, '[data-testid="status-banner"] button')).not.toBeNull();
   });
 
-  it('Log out (live data only) clears the session, closes the transport and goes to /login', async () => {
-    const auth = fakeAuth();
-    const ctx = await setup({}, { mock: false, providers: [{ provide: AuthSessionService, useValue: auth }] });
-    const nav = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
-    expect(text(q(ctx, '[data-testid="page-header"]'))).toContain('TESTUID');
-    q(ctx, '[data-testid="logout"]')!.click();
-    expect(auth.logout).toHaveBeenCalledTimes(1);
-    expect(ctx.transport.status()).toBe('closed');
-    expect(nav).toHaveBeenCalledWith('/login');
+  it('live data shows no client ID and no Log out button', async () => {
+    const ctx = await setup({}, { mock: false, providers: [{ provide: AuthSessionService, useValue: fakeAuth() }] });
+    expect(q(ctx, '[data-testid="logout"]')).toBeNull();
+    expect(text(q(ctx, 'main'))).not.toContain('TESTUID');
   });
 
-  it('mock mode has no Log out button', async () => {
+  it('demo mode has no Log out button', async () => {
     const ctx = await setup({});
     expect(q(ctx, '[data-testid="logout"]')).toBeNull();
   });

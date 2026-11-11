@@ -133,6 +133,66 @@ describe('ChainFeedFacade', () => {
     expect(store.quotes().get('NFO|300')!().ltp).toBe(100);
   });
 
+  it('holdLegKeys subscribes new keys once and unsubscribes released ones', async () => {
+    const { facade, store, transport } = setup();
+    await facade.select(NIFTY);
+    transport.sent.length = 0;
+
+    facade.holdLegKeys(['NFO|9001', 'NFO|9002']);
+    facade.holdLegKeys(['NFO|9001', 'NFO|9002', 'NFO|9003']);
+    expect(sentPairs(transport.sent)).toEqual([['t', 'NFO|9001'], ['t', 'NFO|9002'], ['t', 'NFO|9003']]);
+
+    transport.sent.length = 0;
+    facade.holdLegKeys(['NFO|9003']);
+    expect(sentPairs(transport.sent)).toEqual([['u', 'NFO|9001'], ['u', 'NFO|9002']]);
+    expect(transport.subscribedKeys()).toContain('NFO|9003');
+    expect(transport.subscribedKeys()).not.toContain('NFO|9001');
+    expect(store.legPrices().has('NFO|9003')).toBe(true); // seeded ack feeds the held key
+  });
+
+  it('switching expiry keeps a held leg key subscribed', async () => {
+    const { facade, store, transport, buffer } = setup();
+    await facade.select(NIFTY);
+    const held = keysOf(ROWS_03)[0]!; // a key of the visible chain that the expiry switch will release
+    facade.holdLegKeys([held]);
+    transport.sent.length = 0;
+
+    await facade.selectExpiry('2026-11-10');
+
+    expect(sentPairs(transport.sent).filter(([t, k]) => t === 'u' && k === held)).toEqual([]);
+    expect(transport.subscribedKeys()).toContain(held);
+
+    // Still delivered: a tick for the held key (no longer in the chain) updates legPrices.
+    buffer.push({ t: 'tf', e: 'NFO', tk: held.split('|')[1]!, lp: '777' });
+    expect(store.legPrices().get(held)).toBe(777);
+
+    // Back to the original expiry: still held exactly once (no u, no duplicate t on the wire).
+    transport.sent.length = 0;
+    await facade.selectExpiry('2026-11-03');
+    const pairs = sentPairs(transport.sent);
+    expect(pairs.filter(([t, k]) => t === 'u' && k === held)).toEqual([]);
+    expect(pairs.filter(([t, k]) => t === 't' && k === held)).toEqual([]);
+    expect(transport.subscribedKeys().filter((k) => k === held)).toHaveLength(1);
+  });
+
+  it('holding a key already on the chain gives legPrices its price at once', async () => {
+    const { facade, store } = setup();
+    await facade.select(NIFTY);
+    const held = keysOf(ROWS_03)[0]!;
+    expect(store.quotes().get(held)!().ltp).toBe(100);
+    facade.holdLegKeys([held]);
+    expect(store.legPrices().get(held)).toBe(100);
+  });
+
+  it('destroy releases held keys', async () => {
+    const { facade, transport } = setup();
+    await facade.select(NIFTY);
+    facade.holdLegKeys(['NFO|9001']);
+    expect(transport.subscribedKeys()).toContain('NFO|9001');
+    TestBed.resetTestingModule();
+    expect(transport.subscribedKeys()).not.toContain('NFO|9001');
+  });
+
   it('select honours an explicit expiry', async () => {
     const { facade, store } = setup();
     await facade.select(NIFTY, '2026-11-10');

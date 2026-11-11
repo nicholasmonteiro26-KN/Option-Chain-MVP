@@ -1,4 +1,8 @@
 @use './styles/tradesmart-tokens';
+@use '@angular/cdk' as cdk;
+
+// CDK overlay container, used by the chain's "…" contract menu.
+@include cdk.overlay();
 
 body {
   margin: 0;

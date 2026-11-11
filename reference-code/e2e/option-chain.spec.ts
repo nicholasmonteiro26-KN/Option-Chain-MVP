@@ -103,7 +103,7 @@ test('the SENSEX quick button switches the chain; the bar shows LTP and change',
 test('SENSEX 28-Jan-2027 expiry shows Lot 25', async ({ page }) => {
   await open(page, '/option-chain?underlying=BSE:SENSEX&feed=mock');
   await expect(page.locator('.und-bar')).toContainText('Lot 20', T);
-  await page.getByTestId('expiry-2027-01-28').click();
+  await page.getByLabel('Next expiry').selectOption('2027-01-28');
   await expect(page.locator('.und-bar')).toContainText('Lot 25', T);
   await expect(page).toHaveURL(/expiry=2027-01-28/, T);
 });

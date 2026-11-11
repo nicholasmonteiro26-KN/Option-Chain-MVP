@@ -2,7 +2,7 @@ import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http
 import { inject, Injectable, InjectionToken } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import {
-  IndexListEntry, KambalaError, LinkedScripsResponse, NOREN_SESSION_CONFIG, OptionChainRow, ScripSearchResult,
+  IndexListEntry, KambalaError, LinkedScripsResponse, NOREN_SESSION_CONFIG, OptionChainRow, OrderLeg, ScripSearchResult,
   SessionExpiredError, UserDetailsResult,
 } from './kambala.types';
 // Shared with the dev-server proxy, so both send the same bytes (raw JSON, & % + as unicode escapes).
@@ -21,7 +21,15 @@ interface KambalaEnvelope {
 }
 
 /** The REST surface the feature uses (the mock client implements exactly this). */
-export type KambalaRestApi = Pick<KambalaRestClient, 'getLinkedScrips' | 'getOptionChain' | 'searchScrip' | 'getIndexList'>;
+export type KambalaRestApi = Pick<KambalaRestClient, 'getLinkedScrips' | 'getOptionChain' | 'searchScrip' | 'getIndexList' | 'getBasketMargin' | 'placeOrder'
+>;
+
+/** An order leg as Kambala wants it: every value a string. */
+function legFields(l: OrderLeg): Record<string, string> {
+  return {
+    exch: l.exch, tsym: l.tsym, qty: String(l.qty), prc: l.prc.toFixed(2), prd: l.prd, trantype: l.trantype, prctyp: l.prctyp,
+  };
+}
 
 const FORM = new HttpHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' });
 
@@ -78,11 +86,33 @@ export class KambalaRestClient {
     }));
   }
 
+  /** GetBasketMargin: the first leg goes at top level, the rest in `basketlists`. Resolves `marginused`. */
+  // INTEGRATION: confirm the path on TradeSmart's v2 base (the Kambala doc lists /NorenWClientTP/<name>).
+  async getBasketMargin(legs: OrderLeg[]): Promise<number> {
+    const [first, ...rest] = legs;
+    const data: Record<string, string | object[]> = { actid: this.session().actid, ...legFields(first!) };
+    if (rest.length) data['basketlists'] = rest.map(legFields);
+    const res = await this.call<{ marginused?: string }>('GetBasketMargin', data);
+    const margin = res.marginused === undefined || res.marginused.trim() === '' ? NaN : Number(res.marginused);
+    if (!Number.isFinite(margin)) throw new KambalaError('Margin not available');
+    return margin;
+  }
+
+  /** PlaceOrder: a DAY order tagged `OC-STRATEGY`. Resolves `norenordno`; a rejection throws `KambalaError(emsg)`. */
+  // INTEGRATION: confirm the path on TradeSmart's v2 base (the Kambala doc lists /NorenWClientTP/<name>).
+  async placeOrder(leg: OrderLeg): Promise<string> {
+    const res = await this.call<{ norenordno: string }>('PlaceOrder', {
+      actid: this.session().actid, ...legFields(leg), ...(leg.prctyp === 'MKT' ? { prc: '0' } : {}), ret: 'DAY',
+      remarks: 'OC-STRATEGY',
+    });
+    return res.norenordno;
+  }
+
   /**
    * jData always carries `uid`. A v2 session (accessToken) sends `Authorization: Bearer <token>` and no jKey; a
    * legacy session (susertoken only) sends the token as `jKey`.
    */
-  private call<T extends object>(endpoint: string, data: Record<string, string>): Promise<T> {
+  private call<T extends object>(endpoint: string, data: Record<string, string | object[]>): Promise<T> {
     const session = this.session();
     const jData = { uid: session.uid, ...data };
     if (session.accessToken) {

@@ -1,6 +1,7 @@
 import { Location } from '@angular/common';
 import {
-  afterRenderEffect, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, signal,
+  afterNextRender, afterRenderEffect, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject,
+  Injector, signal,
   untracked,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -15,13 +16,22 @@ import { KambalaRestApi, KambalaRestClient } from '../data-access/kambala/kambal
 import { ScripSearchResult, SessionExpiredError } from '../data-access/kambala/kambala.types';
 import { MarketSessionService } from '../data-access/market-session.service';
 import { AuthSessionService } from '../data-access/auth-session.service';
-import { ChainMeta, Expiry, QUICK_UNDERLYINGS, splitFeedKey, Underlying } from '../data-access/models';
+import { InstrumentsService } from '../data-access/instruments.service';
+import {
+  ChainMeta, ChainStrike, chainIdentity, Expiry, QUICK_UNDERLYINGS, splitFeedKey, Underlying, underlyingKey,
+} from '../data-access/models';
 import { QuickUnderlyingsService } from '../data-access/quick-underlyings.service';
 import { OptionChainStore } from '../data-access/option-chain.store';
 import { CustomPreset, CustomView, Prefs, PrefsStore } from '../data-access/prefs.store';
 import { MockMarket } from '../data-access/testing/mock-market';
 import { toCsv } from '../export/csv-export';
-import { ChainTableComponent, TradeEvent } from '../ui/chain-table/chain-table.component';
+import { executeStrategy } from '../strategy/execute-strategy';
+import { StrategyMarginService } from '../strategy/strategy-margin.service';
+import { isSendable, LegContract, legQty, Product, StrategyLeg } from '../strategy/strategy.models';
+import { StrategyStore } from '../strategy/strategy.store';
+import {
+  ChainTableComponent, ContractAction, ContractActionEvent, TradeEvent,
+} from '../ui/chain-table/chain-table.component';
 import {
   ColumnChooserComponent, RenamePresetEvent, SavePresetEvent,
 } from '../ui/column-chooser/column-chooser.component';
@@ -30,6 +40,7 @@ import { FooterActionsComponent } from '../ui/footer-actions/footer-actions.comp
 import { BannerKind, StatusBannerComponent } from '../ui/status-banner/status-banner.component';
 import { Ohlc, QuickPrice, UnderlyingBarComponent } from '../ui/underlying-bar/underlying-bar.component';
 import { ThemeToggleComponent } from '../ui/theme-toggle/theme-toggle.component';
+import { LegSwap, StrategyPanelComponent } from '../ui/strategy-panel/strategy-panel.component';
 import { StrikeCount, ViewToolbarComponent } from '../ui/view-toolbar/view-toolbar.component';
 import { buildViewModel, ChainViewModel } from '../view/chain-view-model';
 import { OPTION_CHAIN_MOCK_MODE, OPTION_CHAIN_USER_ID, provideOptionChain } from './option-chain.providers';
@@ -43,14 +54,48 @@ const EMPTY_STATS: ExpiryStats = {
   atmIv: null, cumOi: null, maxPain: null, pcrOi: null, pcrVol: null, forward: null, forwardSource: null,
 };
 const NO_OHLC: Ohlc = { open: null, high: null, low: null, prevClose: null };
+/** Strikes loaded for a leg's strike picker when its expiry is not the one showing. */
+const PICKER_CHAIN_CNT = 40;
+
+/** Mock-mode status line for each contract action (the hand-off the live app makes instead). */
+const ACTION_TEXT: Record<ContractAction, string> = {
+  chart: 'Opens the chart',
+  advancedChart: 'Opens Advanced Chart',
+  watchlist: 'Adds to your watchlist',
+  basket: 'Adds to your basket',
+  ato: 'Opens Create ATO',
+  marketDepth: 'Opens Market Depth',
+  gtt: 'Opens Create GTT',
+  priceAlert: 'Opens Price Alert',
+};
 
 /** A contract as handed to the watchlist / basket: feed key plus Kambala's exchange and raw token. */
 export interface ContractPayload { token: string; exch: string; rawToken: string; tsym: string }
+
+/** A strategy leg as handed to the basket: Kambala's exchange and raw token, plus the order fields. */
+export interface BasketLegPayload {
+  exch: string;
+  /** Kambala's raw token (e.g. 43651), not the feed key. */
+  token: string;
+  tsym: string;
+  side: 'B' | 'S';
+  /** lots × lot multiplier × lot size */
+  qty: number;
+  /** The limit price; 0 for a market order. */
+  price: number;
+  priceType: 'LMT' | 'MKT';
+  product: Product;
+}
 
 /** Test hooks for the e2e suite (mock mode only). */
 interface MockHooksWindow {
   __mockFeed?: { drop(): void; setSpot(value: number, sym?: string): void };
   __ocMetrics?: { readonly lastRoundTripMs: number | null; readonly resultCount: number };
+}
+
+/** Same shape as `chainIdentity(meta)`: the key of an underlying's chain for one expiry. */
+function chainKey(u: Underlying, expiryIso: string): string {
+  return `${underlyingKey(u)}|${expiryIso}`;
 }
 
 /** A search row as an option underlying. INTEGRATION: filter to F&O underlyings once Kambala says how (Q8). */
@@ -74,7 +119,7 @@ export function searchRowToUnderlying(
   selector: 'oc-option-chain-page',
   imports: [
     UnderlyingBarComponent, ViewToolbarComponent, ExpiryStripComponent, StatusBannerComponent, ColumnChooserComponent,
-    ChainTableComponent, FooterActionsComponent, ThemeToggleComponent,
+    ChainTableComponent, FooterActionsComponent, ThemeToggleComponent, StrategyPanelComponent,
   ],
   // The feature's services live and die with the page (not the route): store, facade, socket / mock feed, worker.
   providers: provideOptionChain(),
@@ -96,10 +141,14 @@ export class OptionChainPageComponent {
   private readonly mockMode = inject(OPTION_CHAIN_MOCK_MODE);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly transport = inject(FEED_TRANSPORT);
-  private readonly session = inject(MarketSessionService);
+  protected readonly session = inject(MarketSessionService);
   private readonly auth = inject(AuthSessionService);
   private readonly router = inject(Router);
   private readonly quickSvc = inject(QuickUnderlyingsService);
+  private readonly instruments = inject(InstrumentsService);
+  private readonly injector = inject(Injector);
+  protected readonly strategy = inject(StrategyStore);
+  protected readonly margin = inject(StrategyMarginService);
 
   /** NIFTY, SENSEX: tokens from GetIndexList with live data (an unavailable SENSEX shows disabled). */
   protected readonly quick = this.quickSvc.list;
@@ -107,13 +156,20 @@ export class OptionChainPageComponent {
   private readonly nifty = computed(() => this.quick()[0]!);
   /** Live data only: the Log out button and the signed-in user. */
   protected readonly live = !this.mockMode;
-  protected readonly signedInAs = computed(() => this.auth.session()?.uid ?? null);
   protected readonly prefs = signal<Prefs>(this.prefsStore.load(this.userId));
   /** Custom editor open (it only shows while the Custom preset is selected, D20). Closed on load. */
   protected readonly editorOpen = signal(false);
   protected readonly searchResults = signal<Underlying[]>([]);
   protected readonly resultsFor = signal<string | null>(null);
-  protected readonly checked = signal<ReadonlySet<string>>(new Set<string>());
+  /** The chain's tick boxes are the legs of the selected underlying's strategy. */
+  protected readonly checked = computed(() => this.strategy.tokens());
+  /** The "Build your strategy" pop-up is showing. */
+  protected readonly strategyOpen = signal(false);
+  /** Execute all is placing orders (never two runs at once). */
+  protected readonly placing = signal(false);
+  /** Chains for the legs' strike pickers, by `chainIdentity`: the ones shown, plus other expiries loaded once. */
+  private readonly pickerChains = signal<ReadonlyMap<string, ChainMeta>>(new Map());
+  private readonly pickerLoads = new Map<string, Promise<ChainMeta | null>>();
   protected readonly stale = signal<ReadonlySet<string>>(new Set<string>());
   protected readonly nowMs = signal(this.clock());
   protected readonly statusLine = signal<string | null>(null);
@@ -121,6 +177,8 @@ export class OptionChainPageComponent {
   private readonly pendingExpiry = signal<string | null>(null);
 
   private destroyed = false;
+  /** Set synchronously when the page starts leaving (log out, session expiry): a run sends no further leg. */
+  private leaving = false;
   private searchSeq = 0;
   private prevSlot: number | null = null;
   private slotMeta: ChainMeta | null = null;
@@ -206,16 +264,6 @@ export class OptionChainPageComponent {
     };
   });
 
-  protected readonly footer = computed(() => {
-    const a = this.store.analytics();
-    const e = this.store.selectedExpiry();
-    return {
-      fwd: a ? a.forward : null,
-      atm: a && a.atmStrike !== 0 ? a.atmStrike : null,
-      expiry: e ? formatExpiryDate(e.iso) : null,
-    };
-  });
-
   /**
    * Controller rule: error > reconnecting > closed > analytics unavailable. Reconnecting follows the feed; closed
    * follows the market session (exchange hours), not the socket.
@@ -229,8 +277,85 @@ export class OptionChainPageComponent {
     return null;
   });
 
+  /** Errors and reconnecting need attention, so they keep the full-width banner above the chain. */
+  protected readonly alertKind = computed<BannerKind | null>(() => {
+    const k = this.bannerKind();
+    return k === 'error' || k === 'reconnecting' ? k : null;
+  });
+
+  /** Quiet states (market closed, analytics off) sit in the toolbar beside the Strikes picker, taking no rows. */
+  protected readonly notice = computed<string | null>(() => {
+    switch (this.bannerKind()) {
+      case 'closed':
+        return 'Market closed · Prices as of 15:30';
+      case 'analytics-unavailable':
+        return 'Analytics unavailable · Prices are live';
+      default:
+        return null;
+    }
+  });
+
+  /** Strike options for a leg's expiry and type, from the selected underlying's cached chain of that expiry. */
+  protected readonly pickerFor = computed(() => {
+    const u = this.store.underlying();
+    const chains = this.pickerChains();
+    return (leg: StrategyLeg): { strikes: number[]; ready: boolean } => {
+      const meta = u ? chains.get(chainKey(u, leg.expiryIso)) : undefined;
+      if (!meta) return { strikes: [], ready: false };
+      const side = leg.type === 'CE' ? 'ce' : 'pe';
+      return { strikes: meta.strikes.filter((s) => s[side]).map((s) => s.strike), ready: true };
+    };
+  });
+
   constructor() {
     const destroyRef = inject(DestroyRef);
+
+    // ---- Build your strategy ----
+    this.margin.setLivePrices(this.store.legPrices);
+    this.margin.setActive(this.strategyOpen); // margin is asked only while the pop-up shows
+
+    // A limit leg with no price yet (picked before any tick, e.g. moved to another expiry) takes the first live price.
+    effect(() => {
+      const live = this.store.legPrices();
+      const legs = this.strategy.current().legs;
+      untracked(() => {
+        for (const l of legs) {
+          const px = live.get(l.token);
+          if (l.priceType === 'LMT' && l.price <= 0 && px !== undefined && px > 0) this.strategy.update(l.id, { price: px });
+        }
+      });
+    });
+
+    // Every leg (of every underlying) stays subscribed, so its live price flows whatever chain is showing.
+    effect(() => {
+      const keys = this.strategy.allTokens();
+      untracked(() => this.facade.holdLegKeys(keys));
+    });
+
+    // The chain showing feeds the strike pickers; a leg on another expiry has that expiry's chain loaded once.
+    effect(() => {
+      const meta = this.store.meta();
+      const isos = new Set(this.strategy.current().legs.map((l) => l.expiryIso));
+      if (!meta) return;
+      untracked(() => {
+        this.cacheChain(meta);
+        for (const iso of isos) void this.pickerChain(iso);
+      });
+    });
+
+    // The pop-up closes with its last leg (also on a switch to an underlying without legs). Focus inside it (or lost
+    // with it) goes back to the footer button, or to the chain while that button is off (no legs).
+    effect(() => {
+      if (this.strategy.current().legs.length > 0) return;
+      untracked(() => {
+        if (!this.strategyOpen()) return;
+        const panel = this.host.nativeElement.querySelector('oc-strategy-panel');
+        const active = typeof document === 'undefined' ? null : document.activeElement;
+        const hadFocus = !active || active === document.body || !!panel?.contains(active);
+        this.strategyOpen.set(false);
+        if (hadFocus) afterNextRender(() => this.focusStrategyButton(), { injector: this.injector });
+      });
+    });
 
     // Keep the URL bookmarkable: underlying and (once known) expiry, via history.replaceState.
     effect(() => {
@@ -274,6 +399,17 @@ export class OptionChainPageComponent {
 
     this.armStaleCheck();
     if (this.mockMode) this.installMockHooks(destroyRef);
+
+    // Closing or reloading the tab while orders are being placed asks the browser to warn first.
+    if (typeof window !== 'undefined') {
+      const onBeforeUnload = (e: BeforeUnloadEvent): void => {
+        if (!this.placing()) return;
+        e.preventDefault();
+        e.returnValue = ''; // older browsers need it set to show the prompt
+      };
+      window.addEventListener('beforeunload', onBeforeUnload);
+      destroyRef.onDestroy(() => window.removeEventListener('beforeunload', onBeforeUnload));
+    }
 
     destroyRef.onDestroy(() => {
       this.destroyed = true;
@@ -334,11 +470,11 @@ export class OptionChainPageComponent {
 
   private select(u: Underlying, expiryIso?: string): Promise<void> {
     this.resetSelectionView();
+    this.strategy.setUnderlying(underlyingKey(u)); // each underlying keeps its own legs
     return this.facade.select(u, expiryIso);
   }
 
   private resetSelectionView(): void {
-    this.checked.set(new Set());
     this.stale.set(new Set());
     this.pendingExpiry.set(null);
     this.scrollReq = { notMeta: null };
@@ -347,19 +483,13 @@ export class OptionChainPageComponent {
   // ---- template handlers ---------------------------------------------------------------------------------------
 
   protected onSelectUnderlying(u: Underlying): void {
-    if (u.unavailable) return;
+    if (u.unavailable || this.refusedWhilePlacing()) return;
     void this.select(u);
-  }
-
-  /** Log out (live data): clears the session, closes the socket, then shows the login page. */
-  protected logout(): void {
-    this.auth.logout();
-    this.transport.close();
-    this.router.navigateByUrl('/login').catch(() => undefined);
   }
 
   /** Session expired (live data): drop the dead session and log in again, coming back to `returnUrl`. */
   private toLogin(returnUrl: string): void {
+    this.leaving = true; // a run in flight sends no further leg (and canLeave lets the page go)
     this.auth.logout();
     this.transport.close();
     this.router.navigate(['/login'], { queryParams: { returnUrl } }).catch(() => undefined);
@@ -390,6 +520,7 @@ export class OptionChainPageComponent {
 
   protected onExpiry(e: Expiry): void {
     if (e.iso === this.store.selectedExpiry()?.iso && this.pendingExpiry() === null) return;
+    if (this.refusedWhilePlacing()) return;
     this.pendingExpiry.set(e.iso);
     this.scrollReq = { notMeta: this.store.meta() };
     void this.facade.selectExpiry(e.iso).finally(() => {
@@ -436,10 +567,96 @@ export class OptionChainPageComponent {
     this.updatePrefs({ customPresets: this.prefs().customPresets.filter((p) => p.id !== id) });
   }
 
+  /** A tick box adds the contract to the strategy as a leg (Buy 1 lot at its LTP); unticking removes it. */
   protected onToggleCheck(token: string): void {
-    const next = new Set(this.checked());
-    if (!next.delete(token)) next.add(token);
-    this.checked.set(next);
+    if (this.refusedWhilePlacing()) return;
+    const meta = this.store.meta();
+    const row = meta?.strikes.find((s) => s.ce?.token === token || s.pe?.token === token);
+    const c = meta && row ? this.legContract(meta, row, row.ce?.token === token ? 'CE' : 'PE') : null;
+    if (c && this.strategy.toggle(c) === 'full') this.showStatus('A strategy holds up to 10 legs');
+  }
+
+  protected onBuildStrategy(): void {
+    this.strategyOpen.update((open) => !open);
+  }
+
+  /** Collapse (chevron or Esc): focus goes back to the footer button that opened the pop-up. */
+  protected onCollapseStrategy(): void {
+    this.strategyOpen.set(false);
+    this.focusStrategyButton();
+  }
+
+  /** The footer's Build-your-strategy button; the chain's table box while that button is off (no legs). */
+  private focusStrategyButton(): void {
+    const el = this.host.nativeElement;
+    const btn = el.querySelector<HTMLButtonElement>('oc-footer-actions button.strategy');
+    (btn && !btn.disabled ? btn : el.querySelector<HTMLElement>('oc-chain-table .tbl-wrap'))?.focus();
+  }
+
+  /**
+   * A leg's expiry, strike or type changed in the pop-up: the leg becomes that contract (the nearest listed strike
+   * when the exact one is not in that expiry's chain).
+   */
+  protected async onSwap(e: LegSwap): Promise<void> {
+    const meta = await this.pickerChain(e.expiryIso);
+    if (this.destroyed || !this.strategy.current().legs.some((l) => l.id === e.id)) return; // gone meanwhile
+    const side = e.type === 'CE' ? 'ce' : 'pe';
+    const rows = meta?.strikes.filter((s) => s[side]) ?? [];
+    const row = rows.reduce<ChainStrike | null>(
+      (best, s) => (!best || Math.abs(s.strike - e.strike) < Math.abs(best.strike - e.strike) ? s : best), null);
+    const c = meta && row ? this.legContract(meta, row, e.type) : null;
+    if (!c) {
+      this.showStatus('Could not load that expiry. Try again.');
+      return;
+    }
+    if (this.strategy.swap(e.id, c) === 'duplicate') this.showStatus('Already in your strategy');
+  }
+
+  /**
+   * Places the included legs one at a time (buys first); never two runs at once, never while the market is closed
+   * or a limit leg has no price. Results go to the strategy that was placed; once the page is gone no further leg is
+   * sent. While it runs, the strategy can't be changed or left (`refusedWhilePlacing`).
+   */
+  protected async onExecute(): Promise<void> {
+    const s = this.strategy.current();
+    if (this.placing() || this.leaving || !this.session.isOpen() ||
+      s.legs.some((l) => isSendable(l) && l.priceType === 'LMT' && l.price <= 0)) {
+      return;
+    }
+    const key = this.strategy.activeKey();
+    this.placing.set(true);
+    try {
+      await executeStrategy(
+        s, this.store.legPrices(), (o) => this.rest.placeOrder(o), (r) => this.strategy.setResults(r, key),
+        () => this.destroyed || this.leaving,
+      );
+    } finally {
+      this.placing.set(false);
+    }
+  }
+
+  /**
+   * The route's canDeactivate: in-app navigation away is refused (with the status line) while orders are being
+   * placed. Leaving for the login (log out, session expiry) is always allowed.
+   */
+  canLeave(): boolean {
+    return this.leaving || !this.refusedWhilePlacing();
+  }
+
+  /** True (with a status line) while orders are being placed: the strategy being placed must stay as it is. */
+  private refusedWhilePlacing(): boolean {
+    if (this.placing()) this.showStatus('Orders are being placed…');
+    return this.placing();
+  }
+
+  protected onSaveToBasket(): void {
+    const items = this.basketLegs();
+    if (!this.mockMode) {
+      // INTEGRATION: BasketService.add(items) — one BasketLegPayload per included leg:
+      // { exch, token: raw token, tsym, side, qty, price, priceType, product }. TradeSmart lets the user pick the basket.
+      return;
+    }
+    this.showStatus(`Saves ${items.length === 1 ? '1 leg' : `${items.length} legs`} to your basket, as today.`);
   }
 
   protected onTrade(t: TradeEvent): void {
@@ -455,6 +672,29 @@ export class OptionChainPageComponent {
     const when = e ? formatExpiryDate(e.iso).slice(0, 6) : '';
     const what = leg ? `${leg.strike} ${leg.type}` : t.tsym;
     this.showStatus(`Opens the order window: ${t.side} ${this.selected().sym} ${when} ${what} @ ${t.ltp.toFixed(2)} · lot ${t.lotSize}`);
+  }
+
+  /**
+   * The chart buttons and the "…" menu on one contract. Each hands the contract to an existing TradeSmart screen,
+   * as its option chain does today.
+   */
+  protected onContractAction(a: ContractActionEvent): void {
+    if (!this.mockMode) {
+      // INTEGRATION, per action — all take the contract { exch: a.exch, token: a.rawToken, tsym: a.tsym }:
+      //   chart         → TradeSmart's Chart view for this contract
+      //   advancedChart → Advanced Chart (the TradingView chart behind "Go to Advanced Trader")
+      //   watchlist     → WatchlistService.add([contract]) — TradeSmart lets the user pick the watchlist
+      //   basket        → BasketService.add([contract]) — TradeSmart lets the user pick the basket
+      //   ato           → Create ATO window       gtt        → Create GTT window
+      //   marketDepth   → Market Depth panel      priceAlert → Price Alert window (pre-filled with a.ltp)
+      return;
+    }
+    // Mock mode: simulated contracts must never reach real TradeSmart screens. Describe the hand-off instead.
+    const leg = this.findLeg(a.token);
+    const e = this.store.selectedExpiry();
+    const when = e ? formatExpiryDate(e.iso).slice(0, 6) : '';
+    const what = `${this.selected().sym} ${when} ${leg ? `${leg.strike} ${leg.type}` : a.tsym}`;
+    this.showStatus(`${ACTION_TEXT[a.action]}: ${what}`);
   }
 
   protected onAddToWatchlist(): void {
@@ -527,12 +767,54 @@ export class OptionChainPageComponent {
 
   /** The ticked contracts as watchlist / basket items (exchange and raw token split out of the feed key). */
   protected checkedContracts(): ContractPayload[] {
-    const tsyms = new Map<string, string>();
-    for (const s of this.store.meta()?.strikes ?? []) {
-      if (s.ce) tsyms.set(s.ce.token, s.ce.tsym);
-      if (s.pe) tsyms.set(s.pe.token, s.pe.tsym);
+    return this.strategy.current().legs.map((l) => ({ token: l.token, ...splitFeedKey(l.token), tsym: l.tsym }));
+  }
+
+  /** The included legs as basket items (Save to basket). */
+  protected basketLegs(): BasketLegPayload[] {
+    const s = this.strategy.current();
+    return s.legs.filter((l) => l.included).map((l) => ({
+      exch: l.exch, token: splitFeedKey(l.token).rawToken, tsym: l.tsym, side: l.side, qty: legQty(l, s.lotMultiplier),
+      price: l.priceType === 'MKT' ? 0 : l.price, priceType: l.priceType, product: s.product,
+    }));
+  }
+
+  /** One side of a chain row as a strategy contract, priced from the leg feed or the chain quote. */
+  private legContract(meta: ChainMeta, row: ChainStrike, type: 'CE' | 'PE'): LegContract | null {
+    const ref = type === 'CE' ? row.ce : row.pe;
+    if (!ref) return null;
+    const ltp = this.store.legPrices().get(ref.token) ?? this.store.quotes().get(ref.token)?.().ltp ?? null;
+    return {
+      token: ref.token, tsym: ref.tsym, exch: splitFeedKey(ref.token).exch, expiryIso: meta.expiry.iso,
+      strike: row.strike, type, lotSize: ref.lotSize, tickSize: ref.tickSize, ltp,
+    };
+  }
+
+  private cacheChain(meta: ChainMeta): void {
+    const key = chainIdentity(meta);
+    if (this.pickerChains().get(key) !== meta) this.pickerChains.update((m) => new Map(m).set(key, meta));
+  }
+
+  /** The selected underlying's chain for `iso` (strike pickers, swaps): cached, else loaded once. Null if it can't be. */
+  private pickerChain(iso: string): Promise<ChainMeta | null> {
+    const u = this.store.underlying();
+    const spot = this.store.spot();
+    const expiry = this.store.expiries().find((x) => x.iso === iso);
+    if (!u || !expiry || spot === null) return Promise.resolve(null);
+    const key = chainKey(u, iso);
+    const cached = this.pickerChains().get(key);
+    if (cached) return Promise.resolve(cached);
+    let load = this.pickerLoads.get(key);
+    if (!load) {
+      load = this.instruments.loadChain(u, expiry, spot, PICKER_CHAIN_CNT)
+        .then((meta) => {
+          if (!this.destroyed) this.cacheChain(meta);
+          return meta;
+        }, () => null)
+        .finally(() => this.pickerLoads.delete(key));
+      this.pickerLoads.set(key, load);
     }
-    return [...this.checked()].map((token) => ({ token, ...splitFeedKey(token), tsym: tsyms.get(token) ?? '' }));
+    return load;
   }
 
   private checkedLabel(n: number): string {

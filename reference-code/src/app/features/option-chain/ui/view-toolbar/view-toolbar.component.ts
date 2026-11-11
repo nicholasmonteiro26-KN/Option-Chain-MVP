@@ -18,6 +18,9 @@ let nextId = 0;
         }
       </div>
       <div class="tools">
+        @if (notice(); as n) {
+          <span class="notice" data-testid="market-notice" role="status"><span class="nd" aria-hidden="true"></span>{{ n }}</span>
+        }
         @if (presetId() === 'custom' && !customEditorOpen()) {
           <button type="button" class="tool" (click)="editColumns.emit()">Edit columns</button>
         }
@@ -43,6 +46,8 @@ let nextId = 0;
     .chip[aria-pressed='true'] { background: var(--ts-blue); border-color: var(--ts-blue); color: var(--ts-on-accent); }
     .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; align-items: center; }
     .lbl { font-size: 12px; color: var(--ts-muted); }
+    .notice { display: inline-flex; align-items: center; gap: 6px; margin-right: 8px; font-size: 12px; color: var(--ts-muted); }
+    .nd { width: 7px; height: 7px; border-radius: 50%; background: var(--ts-muted); }
     button.tool {
       border: 1px solid var(--ts-outline); background: transparent; color: var(--ts-outline); border-radius: 4px;
       padding: 4px 10px; min-height: 32px; font: inherit; font-size: 13px; cursor: pointer;
@@ -58,6 +63,8 @@ export class ViewToolbarComponent {
   readonly presetId = input.required<PresetId | string>();
   readonly customEditorOpen = input(false);
   readonly strikeCount = input<StrikeCount>(16);
+  /** A short status shown beside the Strikes picker, e.g. "Market closed · Prices as of 15:30". */
+  readonly notice = input<string | null>(null);
 
   readonly presetChange = output<PresetId>();
   readonly editColumns = output<void>();

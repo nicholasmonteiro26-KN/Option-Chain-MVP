@@ -21,6 +21,8 @@ export interface ColumnDef {
   exact?: boolean;
   /** Tooltip of the header and every cell (e.g. the GEX sign convention). */
   title?: string;
+  /** Unit shown after the header label, as TradeSmart does ("OI (In Lacs)"). */
+  unit?: string;
 }
 
 /** Price precision when a contract does not say (Kambala `pp`). */
@@ -31,6 +33,9 @@ export const GEX_TITLE =
 
 const DASH = '–';
 const LAKH = 1e5;
+/** TradeSmart spells the unit "Lacs" in its chain headers. */
+export const LAKH_UNIT = 'In Lacs';
+const CR_UNIT = '₹ Cr';
 
 type Fmt = (v: number | string | null, pp?: number) => string;
 const num = (f: (n: number, pp?: number) => string): Fmt => (v, pp) =>
@@ -92,9 +97,10 @@ const chgPctOf = (x: LegQuote): number | null => {
 };
 
 const DEFS: ColumnDef[] = [
-  sideQ('volume', 'Volume', (x) => x.volume, lakh, { sum: true, exact: true }),
-  sideQ('oi', 'OI', (x) => x.oi, lakh, { sum: true, bar: 'oi', exact: true }),
-  sideA('oiChg', 'OI Chg', (x) => x.oiChg, num((n) => signed(n / LAKH, 2)), { sum: true, exact: true }),
+  sideQ('volume', 'Volume', (x) => x.volume, lakh, { sum: true, exact: true, unit: LAKH_UNIT }),
+  sideQ('oi', 'OI', (x) => x.oi, lakh, { sum: true, bar: 'oi', exact: true, unit: LAKH_UNIT }),
+  sideA('oiChg', 'OI Chg', (x) => x.oiChg, num((n) => signed(n / LAKH, 2)),
+    { sum: true, exact: true, unit: LAKH_UNIT }),
   sideA('oiChgPct', 'OI Chg %', (x) => x.oiChgPct, signedFmt(2)),
   sideA('oiSense', 'OI Sense', (x) => x.sense, senseFmt),
   sideQ('bid', 'Bid', (x) => x.bid, price),
@@ -116,13 +122,13 @@ const DEFS: ColumnDef[] = [
   strikeCol('straddleBid', 'Straddle Bid', (x) => x.straddleBid, price),
   strikeCol('straddleAsk', 'Straddle Ask', (x) => x.straddleAsk, price),
   strikeCol('strDecay', 'Str Decay', (x) => x.strDecay, signedPrice),
-  strikeCol('cumOi', 'Cum OI', (x) => x.cumOi, lakh, { sum: true, bar: 'cumOi', exact: true }),
+  strikeCol('cumOi', 'Cum OI', (x) => x.cumOi, lakh, { sum: true, bar: 'cumOi', exact: true, unit: LAKH_UNIT }),
   strikeCol('avgIv', 'Avg IV', (x) => x.avgIv, pct100(2)),
   strikeCol('pcrOi', 'PCR (OI)', (x) => x.pcrOi, fixed(2)),
   strikeCol('pcrVol', 'PCR (Vol)', (x) => x.pcrVol, fixed(2)),
-  strikeCol('painCr', 'Pain', (x) => x.painCr, fixed(0)),
-  strikeCol('gexOiCr', 'GEX-OI', (x) => x.gexOiCr, signedFmt(1), { title: GEX_TITLE }),
-  strikeCol('gexVolCr', 'GEX-Vol', (x) => x.gexVolCr, signedFmt(1), { title: GEX_TITLE }),
+  strikeCol('painCr', 'Pain', (x) => x.painCr, fixed(0), { unit: CR_UNIT }),
+  strikeCol('gexOiCr', 'GEX-OI', (x) => x.gexOiCr, signedFmt(1), { title: GEX_TITLE, unit: CR_UNIT }),
+  strikeCol('gexVolCr', 'GEX-Vol', (x) => x.gexVolCr, signedFmt(1), { title: GEX_TITLE, unit: CR_UNIT }),
 ];
 
 export const COLUMNS: Record<string, ColumnDef> = Object.fromEntries(DEFS.map((d) => [d.id, d]));

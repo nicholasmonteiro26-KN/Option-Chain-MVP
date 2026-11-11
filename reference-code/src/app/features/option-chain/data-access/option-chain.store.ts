@@ -73,6 +73,19 @@ export class OptionChainStore {
   /** Live price per quick-switch symbol, for the quick buttons. */
   readonly quickPrices: Signal<Readonly<Record<string, QuickQuote>>> = this._quickPrices.asReadonly();
 
+  /** Keys whose ticks feed `legPrices` (strategy legs, which may be off the visible chain). */
+  private legKeys: ReadonlySet<string> = new Set();
+  private readonly _legPrices = signal<ReadonlyMap<string, number>>(new Map());
+  /** Last LTP per held leg key. */
+  readonly legPrices: Signal<ReadonlyMap<string, number>> = this._legPrices.asReadonly();
+
+  /**
+   * Merged raw ticks per contract on the chain or held as a leg. The transport ref-counts subscriptions, so a key
+   * subscribed again (a held leg the chain also shows, an expiry switch back) gets no fresh snapshot: its prev close,
+   * prev OI and open would be lost. A newly installed chain seeds its quotes from here. Kept to chain ∪ held keys.
+   */
+  private readonly feedCache = new Map<string, TickPartial>();
+
   /** OI and volume from the feed are in lots: scale them to quantity at ingestion (spec §4 config). */
   private readonly oiInLots = inject(OPTION_CHAIN_CONFIG).oiUnit === 'lots';
 
@@ -83,13 +96,55 @@ export class OptionChainStore {
   setChain(meta: ChainMeta): void {
     const map = new Map<string, WritableSignal<LegQuote>>();
     for (const s of meta.strikes) {
-      if (s.ce) map.set(s.ce.token, signal(defaultQuote(s.ce, 'CE', s.strike)));
-      if (s.pe) map.set(s.pe.token, signal(defaultQuote(s.pe, 'PE', s.strike)));
+      if (s.ce) map.set(s.ce.token, signal(this.seeded(defaultQuote(s.ce, 'CE', s.strike))));
+      if (s.pe) map.set(s.pe.token, signal(this.seeded(defaultQuote(s.pe, 'PE', s.strike))));
     }
+    this.pruneFeedCache(map.keys());
     this._analytics.set(null);
     this.meta.set(meta);
     this._quotes.set(map);
     this._dataVersion.update((v) => v + 1);
+  }
+
+  /** Merges a raw tick into a quote. token/type/strike are identity fields: never overwritten by a tick. */
+  private merge(q: LegQuote, partial: TickPartial): LegQuote {
+    const { token: _t, type: _ty, strike: _s, ...fields } = partial;
+    const patch = stripUndefined(fields);
+    if (this.oiInLots) {
+      const lot = patch.lotSize ?? q.lotSize;
+      if (patch.oi !== undefined) patch.oi *= lot;
+      if (patch.prevOi !== undefined) patch.prevOi *= lot;
+      if (patch.volume !== undefined) patch.volume *= lot;
+    }
+    return { ...q, ...patch };
+  }
+
+  /** A new chain quote, with what the feed already sent for that key (see feedCache). */
+  private seeded(q: LegQuote): LegQuote {
+    const cached = this.feedCache.get(q.token);
+    return cached ? this.merge(q, cached) : q;
+  }
+
+  private pruneFeedCache(chainKeys: Iterable<string>): void {
+    const keep = new Set(chainKeys);
+    for (const k of this.feedCache.keys()) if (!keep.has(k) && !this.legKeys.has(k)) this.feedCache.delete(k);
+  }
+
+  /** Sets the keys whose ticks feed `legPrices`; prices of keys no longer held are dropped. */
+  setLegKeys(keys: ReadonlySet<string>): void {
+    this.legKeys = new Set(keys);
+    this.pruneFeedCache(this._quotes().keys());
+    const cur = this._legPrices();
+    const kept = new Map([...cur].filter(([k]) => keys.has(k)));
+    // A newly held key already on the chain is ref-counted (no ack): seed its price from the chain quote.
+    const quotes = this._quotes();
+    let seeded = false;
+    for (const k of keys) {
+      if (kept.has(k)) continue;
+      const ltp = quotes.get(k)?.().ltp;
+      if (ltp != null) { kept.set(k, ltp); seeded = true; }
+    }
+    if (seeded || kept.size !== cur.size) this._legPrices.set(kept);
   }
 
   /** Drops the current chain (meta, quotes, analytics, selected expiry), e.g. when the underlying changes. */
@@ -97,6 +152,7 @@ export class OptionChainStore {
     this.meta.set(null);
     this.selectedExpiry.set(null);
     this._quotes.set(new Map());
+    this.pruneFeedCache([]);
     this._analytics.set(null);
     this._dataVersion.update((v) => v + 1);
   }
@@ -109,31 +165,27 @@ export class OptionChainStore {
     let quickChanged = false;
     const quickKeys = this.quickKeys();
     let dataChanged = false;
+    let legPrices: Map<string, number> | null = null;
     for (const [key, partial] of batch) {
+      if (this.legKeys.has(key) && partial.ltp != null) {
+        legPrices ??= new Map(this._legPrices());
+        legPrices.set(key, partial.ltp);
+      }
       if (quickKeys.has(key)) {
         this.quickCache.set(key, { ...this.quickCache.get(key), ...stripUndefined(partial), token: key });
         quickChanged = true;
       }
       const leg = quotes.get(key);
+      if (leg || this.legKeys.has(key)) this.feedCache.set(key, { ...this.feedCache.get(key), ...stripUndefined(partial), token: key });
       if (leg) {
         dataChanged = true;
-        // token/type/strike are identity fields: never overwritten by a tick.
-        const { token: _t, type: _ty, strike: _s, ...fields } = partial;
-        leg.update((q) => {
-          const patch = stripUndefined(fields);
-          if (this.oiInLots) {
-            const lot = patch.lotSize ?? q.lotSize;
-            if (patch.oi !== undefined) patch.oi *= lot;
-            if (patch.prevOi !== undefined) patch.prevOi *= lot;
-            if (patch.volume !== undefined) patch.volume *= lot;
-          }
-          return { ...q, ...patch };
-        });
+        leg.update((q) => this.merge(q, partial));
       } else if (key === spotKey) {
         dataChanged = true;
         this.applySpot(partial);
       }
     }
+    if (legPrices) this._legPrices.set(legPrices);
     if (quickChanged) this.publishQuickPrices();
     if (dataChanged) this._dataVersion.update((v) => v + 1);
   }

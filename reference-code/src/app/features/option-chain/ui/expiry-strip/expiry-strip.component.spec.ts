@@ -46,6 +46,42 @@ describe('ExpiryStripComponent', () => {
     expect(spy).toHaveBeenCalledWith(EXPIRIES[1]);
   });
 
+  it('with no more than 3 expiries there is no drop-down', () => {
+    expect(el().querySelector('[data-testid="expiry-more"]')).toBeNull();
+  });
+
+  describe('more than 3 expiries', () => {
+    const MANY = ['2026-11-03', '2026-11-10', '2026-11-17', '2026-11-24', '2026-12-29'].map(exp);
+    const sel = (): HTMLSelectElement => el().querySelector('[data-testid="expiry-more"]') as HTMLSelectElement;
+    beforeEach(() => {
+      set('expiries', MANY);
+      set('selected', MANY[0]);
+      f.detectChanges();
+    });
+
+    it('shows the 3 nearest as buttons and the rest in a "Next expiry" drop-down', () => {
+      expect(el().querySelectorAll('.exp button').length).toBe(3);
+      expect(sel().getAttribute('aria-label')).toBe('Next expiry');
+      const opts = Array.from(sel().options);
+      expect(opts.map((o) => o.textContent!.trim())).toEqual(['Next expiry', '24 Nov 2026 · 26d', '29 Dec 2026 · 61d']);
+      expect(sel().selectedIndex).toBe(0);
+      expect(sel().classList.contains('on')).toBe(false);
+    });
+
+    it('picking from the drop-down emits that expiry, and the drop-down then shows it as selected', () => {
+      const spy = vi.fn();
+      f.componentInstance.expiryChange.subscribe(spy);
+      sel().value = '2026-12-29';
+      sel().dispatchEvent(new Event('change'));
+      expect(spy).toHaveBeenCalledWith(MANY[4]);
+      set('selected', MANY[4]);
+      f.detectChanges();
+      expect(sel().value).toBe('2026-12-29');
+      expect(sel().classList.contains('on')).toBe(true);
+      expect(Array.from(el().querySelectorAll('.exp button')).every((b) => b.getAttribute('aria-pressed') === 'false')).toBe(true);
+    });
+  });
+
   it('formats the stats', () => {
     expect(val('ATM IV')).toBe('12.34');
     expect(val('Cum OI')).toBe('123 L');

@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { KambalaRestClient, KAMBALA_REST_BASE } from './kambala-rest.client';
-import { KambalaError, NOREN_SESSION_CONFIG, NorenSessionConfig, SessionExpiredError } from './kambala.types';
+import { KambalaError, NOREN_SESSION_CONFIG, NorenSessionConfig, OrderLeg, SessionExpiredError } from './kambala.types';
 
 /** One backslash (keeps the unicode-escape expectations readable). */
 const BS = String.fromCharCode(92);
@@ -183,6 +183,73 @@ describe('KambalaRestClient', () => {
     const p3 = client.searchScrip('A');
     http.expectOne(`${BASE}/SearchScrip`).flush({ stat: 'Not_Ok', emsg: 'Session Expired : Invalid Session Key' });
     await expect(p3).rejects.toBeInstanceOf(SessionExpiredError);
+  });
+
+  const leg = (tsym: string, qty: number, prc: number, trantype: 'B' | 'S'): OrderLeg =>
+    ({ exch: 'NFO', tsym, qty, prc, prctyp: 'LMT', trantype, prd: 'I' });
+
+  it('getBasketMargin posts the first leg at top level and the rest in basketlists', async () => {
+    const p = client.getBasketMargin([leg('NIFTY25NOV26C22850', 130, 14.95, 'B'), leg('NIFTY25NOV26C23000', 65, 8, 'S')]);
+    const req = http.expectOne(`${BASE}/GetBasketMargin`);
+    expect(req.request.method).toBe('POST');
+    expect(jDataOf(req.request.body)).toEqual({
+      uid: 'U1', actid: 'A1',
+      exch: 'NFO', tsym: 'NIFTY25NOV26C22850', qty: '130', prc: '14.95', prd: 'I', trantype: 'B', prctyp: 'LMT',
+      basketlists: [{ exch: 'NFO', tsym: 'NIFTY25NOV26C23000', qty: '65', prc: '8.00', prd: 'I', trantype: 'S', prctyp: 'LMT' }],
+    });
+    req.flush({ stat: 'Ok', marginused: '118420.50' });
+    expect(await p).toBe(118420.5);
+  });
+
+  it('getBasketMargin with one leg sends no basketlists', async () => {
+    const p = client.getBasketMargin([leg('NIFTY25NOV26C22850', 65, 10, 'S')]);
+    const req = http.expectOne(`${BASE}/GetBasketMargin`);
+    expect(Object.keys(jDataOf(req.request.body))).not.toContain('basketlists');
+    req.flush({ stat: 'Ok', marginused: '1000' });
+    expect(await p).toBe(1000);
+  });
+
+  it('placeOrder sends ret DAY and remarks OC-STRATEGY and resolves norenordno', async () => {
+    const p = client.placeOrder(leg('NIFTY25NOV26C22850', 65, 10, 'B'));
+    const req = http.expectOne(`${BASE}/PlaceOrder`);
+    expect(jDataOf(req.request.body)).toMatchObject({
+      uid: 'U1', actid: 'A1', ret: 'DAY', remarks: 'OC-STRATEGY',
+      exch: 'NFO', tsym: 'NIFTY25NOV26C22850', qty: '65', prc: '10.00', prd: 'I', trantype: 'B', prctyp: 'LMT',
+    });
+    req.flush({ stat: 'Ok', norenordno: '26110900123' });
+    expect(await p).toBe('26110900123');
+  });
+
+  it('getBasketMargin without a numeric marginused rejects with "Margin not available" (never NaN)', async () => {
+    for (const body of [{ stat: 'Ok' }, { stat: 'Ok', marginused: '' }, { stat: 'Ok', marginused: 'n/a' }]) {
+      const p = client.getBasketMargin([leg('NIFTY25NOV26C22850', 65, 10, 'S')]);
+      http.expectOne(`${BASE}/GetBasketMargin`).flush(body);
+      const err = await p.catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(KambalaError);
+      expect((err as Error).message).toBe('Margin not available');
+    }
+  });
+
+  it('placeOrder sends a market order with prc "0"; GetBasketMargin keeps its price', async () => {
+    const mkt: OrderLeg = { ...leg('NIFTY25NOV26C22850', 65, 0, 'B'), prctyp: 'MKT' };
+    const p = client.placeOrder(mkt);
+    const req = http.expectOne(`${BASE}/PlaceOrder`);
+    expect(jDataOf(req.request.body)).toMatchObject({ prctyp: 'MKT', prc: '0' });
+    req.flush({ stat: 'Ok', norenordno: '1' });
+    await p;
+    const m = client.getBasketMargin([{ ...mkt, prc: 14.95 }]);
+    const mreq = http.expectOne(`${BASE}/GetBasketMargin`);
+    expect(jDataOf(mreq.request.body)).toMatchObject({ prctyp: 'MKT', prc: '14.95' });
+    mreq.flush({ stat: 'Ok', marginused: '10' });
+    await m;
+  });
+
+  it('placeOrder rejects with Kambala\x27s emsg', async () => {
+    const p = client.placeOrder(leg('NIFTY25NOV26C22850', 65, 10, 'B'));
+    http.expectOne(`${BASE}/PlaceOrder`).flush({ stat: 'Not_Ok', emsg: 'RMS: insufficient margin' });
+    const err = await p.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(KambalaError);
+    expect((err as Error).message).toBe('RMS: insufficient margin');
   });
 
   it('getIndexList sends uid/exch and returns the values', async () => {

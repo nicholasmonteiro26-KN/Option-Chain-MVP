@@ -127,6 +127,17 @@ export interface UserDetailsResult {
   exarr?: string[];
 }
 
+/** One order leg, as sent to GetBasketMargin and PlaceOrder. */
+export interface OrderLeg {
+  exch: string;
+  tsym: string;
+  qty: number;
+  prc: number;
+  prctyp: 'LMT' | 'MKT';
+  trantype: 'B' | 'S';
+  prd: 'I' | 'M';
+}
+
 /** One GetIndexList row: index name and the token used to subscribe. */
 export interface IndexListEntry {
   idxname: string;

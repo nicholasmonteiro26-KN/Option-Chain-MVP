@@ -1,0 +1,180 @@
+<section #panel class="pop" tabindex="-1" aria-labelledby="sp-title">
+  <header class="head">
+    <h2 id="sp-title">Your strategy · {{ sym() }}</h2>
+    <span class="count mu">{{ plural(legs().length, 'leg') }}</span>
+    <button type="button" class="mu push" aria-label="Collapse strategy" title="Collapse" (click)="collapse.emit()">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" /></svg>
+    </button>
+  </header>
+
+  @switch (view()) {
+    @case ('edit') {
+      <!-- Disabled while orders are in flight: no edit can change what is being placed. -->
+      <fieldset class="fs" [disabled]="busy()">
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th aria-label="Include"></th>
+              <th>B/S</th>
+              <th>Expiry</th>
+              <th>Strike</th>
+              <th>Type</th>
+              <th>Lots</th>
+              <th>
+                Price
+                <button type="button" aria-label="Reset prices to live" title="Reset prices to live" (click)="reset()">↻</button>
+              </th>
+              <th>
+                <button type="button" aria-label="Clear all legs" title="Clear all legs" [disabled]="legs().length === 0" (click)="clear()">
+                  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M6 4V2h4v2M4 4l1 10h6l1-10" fill="none" stroke="currentColor" stroke-width="1.4" /></svg>
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (leg of legs(); track leg.id) {
+              @let name = contract(leg);
+              @let picker = pickerFor()(leg);
+              @let live = liveOf(leg);
+              <tr [class.off]="!leg.included">
+                <td>
+                  <input type="checkbox" [checked]="leg.included" [attr.aria-label]="'Include ' + name" (change)="editLeg(leg, { included: !leg.included })" />
+                </td>
+                <td>
+                  <button type="button" class="bs" [class.b]="leg.side === 'B'" [class.s]="leg.side === 'S'"
+                    [attr.aria-label]="(leg.side === 'B' ? 'Buy ' : 'Sell ') + name + ', switch side'"
+                    (click)="editLeg(leg, { side: leg.side === 'B' ? 'S' : 'B' })">{{ leg.side }}</button>
+                </td>
+                <td>
+                  <select class="bx" [attr.aria-label]="'Expiry, ' + name" (change)="pickExpiry(leg, $event)">
+                    @for (iso of expiryOptions(leg); track iso) {
+                      <option [value]="iso" [selected]="iso === leg.expiryIso">{{ formatExpiryDate(iso) }}</option>
+                    }
+                  </select>
+                </td>
+                <td>
+                  <select class="bx" [attr.aria-label]="'Strike, ' + name" [disabled]="!picker.ready" [attr.aria-busy]="!picker.ready"
+                    (change)="pickStrike(leg, $event)">
+                    @for (k of strikeOptions(leg, picker); track k) {
+                      <option [value]="k" [selected]="k === leg.strike">{{ k }}</option>
+                    }
+                  </select>
+                </td>
+                <td>
+                  <button type="button" class="type" [class.ce]="leg.type === 'CE'" [class.pe]="leg.type === 'PE'"
+                    [attr.aria-label]="name + ', switch to ' + (leg.type === 'CE' ? 'PE' : 'CE')"
+                    (click)="swapLeg(leg, { type: leg.type === 'CE' ? 'PE' : 'CE' })">{{ leg.type }}</button>
+                </td>
+                <td>
+                  <span class="step bx lots" [title]="lotsTitle(leg)">
+                    <button type="button" [attr.aria-label]="'Fewer lots, ' + name" [disabled]="leg.lots <= 1" (click)="editLeg(leg, { lots: leg.lots - 1 })">−</button>
+                    <output [attr.aria-label]="'Lots, ' + name">{{ leg.lots }}</output>
+                    <button type="button" [attr.aria-label]="'More lots, ' + name" (click)="editLeg(leg, { lots: leg.lots + 1 })">+</button>
+                  </span>
+                </td>
+                <td>
+                  <input class="bx px" type="number" min="0" step="0.05" inputmode="decimal" [attr.aria-label]="'Limit price, ' + name"
+                    [value]="leg.price.toFixed(2)" [disabled]="leg.priceType === 'MKT'" (change)="setPrice(leg, $event)" />
+                  @if (leg.exch !== 'BFO') {
+                    <button type="button" class="bx mkt" [attr.aria-pressed]="leg.priceType === 'MKT'" [attr.aria-label]="'Market order, ' + name"
+                      title="Market order" (click)="editLeg(leg, { priceType: leg.priceType === 'MKT' ? 'LMT' : 'MKT' })">MKT</button>
+                  }
+                  @if (live !== null) {
+                    <span class="live mu">Live {{ live }}</span>
+                  }
+                  @if (leg.result) {
+                    <span [class]="'res ' + resultLine(leg.result).cls">{{ resultText(leg.result) }}</span>
+                  }
+                </td>
+                <td>
+                  <button type="button" class="mu" [attr.aria-label]="'Remove ' + name" title="Remove" (click)="removeLeg(leg)">
+                    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M6 4V2h4v2M4 4l1 10h6l1-10" fill="none" stroke="currentColor" stroke-width="1.4" /></svg>
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="sum" aria-live="polite">
+        @if (margin().status === 'error') {
+          <div class="err">
+            <div class="k mu">Margin needed · Hedge benefit</div>
+            <div class="v">Margin unavailable <button type="button" class="link" (click)="retryMargin.emit()">Retry</button></div>
+          </div>
+        } @else {
+          <div><div class="k mu">Margin needed</div><div class="v">{{ marginText() }}</div></div>
+          <div><div class="k mu">Hedge benefit</div><div class="v" [class.pos]="hedgePositive()">{{ hedgeText() }}</div></div>
+        }
+        <div><div class="k mu">Net premium</div><div class="v net" [class.pos]="net() > 0" [class.neg]="net() < 0">{{ netText() }}</div></div>
+      </div>
+
+      <div class="act">
+        <span class="mu" id="sp-mult">Lot ×</span>
+        <span class="step bx" role="group" aria-labelledby="sp-mult">
+          <button type="button" aria-label="Fewer lot multiples" [disabled]="strategy().lotMultiplier <= 1" (click)="setLotMultiplier(strategy().lotMultiplier - 1)">−</button>
+          <output>{{ strategy().lotMultiplier }}</output>
+          <button type="button" aria-label="More lot multiples" (click)="setLotMultiplier(strategy().lotMultiplier + 1)">+</button>
+        </span>
+        <span class="step bx" role="group" aria-label="Product">
+          @for (p of products; track p) {
+            <button type="button" [attr.aria-pressed]="strategy().product === p" (click)="setProduct(p)">{{ productLabel[p] }}</button>
+          }
+        </span>
+        <button type="button" class="btn push" [disabled]="included().length === 0" (click)="saveToBasket.emit()">Save to basket</button>
+        @if (!marketOpen()) {
+          <span class="mu">Market closed</span>
+        } @else if (bfoMarket()) {
+          <span class="mu">{{ bfoMktReason }}</span>
+        } @else if (waitingForPrice()) {
+          <span class="mu">Waiting for a price</span>
+        }
+        <button #execBtn type="button" class="btn go" [disabled]="cannotPlace()" (click)="openConfirm()">Execute all</button>
+      </div>
+      </fieldset>
+    }
+
+    @case ('confirm') {
+      <div class="confirm">
+        <ul>
+          @for (leg of included(); track leg.id) {
+            <li>
+              <b>{{ leg.side }}</b> {{ contract(leg) }} · Qty {{ qty(leg) }} · {{ leg.priceType === 'MKT' ? 'MKT' : leg.price.toFixed(2) }}
+              @if (leg.result) {
+                <span class="res mu">· Last run: {{ resultText(leg.result) }}</span>
+              }
+            </li>
+          }
+        </ul>
+        <p class="meta mu">Margin needed {{ marginText() }} · {{ productLabel[strategy().product] }}</p>
+        <div class="act">
+          <button #confirmBack type="button" class="btn push" [disabled]="busy()" (click)="back()">Back</button>
+          @if (!marketOpen()) {
+            <span class="mu">Market closed</span>
+          }
+          <button #placeBtn type="button" class="btn go" [disabled]="cannotPlace()" [attr.aria-busy]="placing()" (click)="place()">
+            Place {{ plural(included().length, 'order') }}
+          </button>
+        </div>
+      </div>
+    }
+
+    @case ('results') {
+      <div class="results">
+        <ul #resultList tabindex="-1" aria-label="Order results">
+          @for (leg of withResult(); track leg.id) {
+            @let r = resultLine(leg.result!);
+            <li>
+              <span [class]="'pill ' + r.cls">{{ r.label }}</span> {{ leg.side }} {{ contract(leg) }}@if (r.detail) { · {{ r.detail }}}
+            </li>
+          }
+        </ul>
+        <div class="act">
+          <button type="button" class="btn push" [disabled]="busy()" (click)="back()">Back</button>
+        </div>
+      </div>
+    }
+  }
+</section>

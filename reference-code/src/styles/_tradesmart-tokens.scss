@@ -29,12 +29,14 @@
   --ts-red: #e83937;
   --ts-green-soft: #e8f6e2;
   --ts-red-soft: #fde9e9;
-  --ts-bar-ce: rgba(232, 57, 55, 0.22);
-  --ts-bar-pe: rgba(57, 176, 14, 0.22);
   --ts-bar-cum: rgba(63, 113, 235, 0.18);
   // OI Sense: green, red, orange, cyan (GoCharting, spec 8)
   --ts-on-accent: #ffffff;
   --ts-shadow: rgba(0, 0, 0, 0.35);
+  --ts-menu-shadow: rgba(0, 0, 0, 0.15);
+  --ts-tool-fg: #555555; // footer Add to Watchlist / Basket (TradeSmart grey-btn)
+  --ts-tool-border: rgba(128, 128, 128, 0.35);
+  --ts-badge-bg: #dddddd;
   --ts-warn-soft: #fff6e6;
   --ts-warn: #a15c00;
   --ts-sense-lb: #39b00e;
@@ -66,13 +68,15 @@ body[color-theme='dark'] {
   --ts-blue-soft: #233050;
   --ts-green-soft: rgba(57, 176, 14, 0.2);
   --ts-red-soft: rgba(232, 57, 55, 0.2);
-  --ts-bar-ce: rgba(232, 57, 55, 0.33);
-  --ts-bar-pe: rgba(57, 176, 14, 0.33);
   --ts-bar-cum: rgba(63, 113, 235, 0.3);
   --ts-warn-soft: #6d3d02;
   --ts-warn: #f2b45a;
   --ts-sense-sc: #f2a54a;
   --ts-sense-lu: #4fc6d8;
   --ts-shadow: rgba(0, 0, 0, 0.6);
+  --ts-menu-shadow: rgba(0, 0, 0, 0.5);
+  --ts-tool-fg: #c9ccd3;
+  --ts-tool-border: rgba(160, 160, 160, 0.35);
+  --ts-badge-bg: #2b3650;
   color-scheme: dark;
 }

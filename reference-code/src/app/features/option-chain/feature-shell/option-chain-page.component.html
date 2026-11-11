@@ -1,14 +1,5 @@
 <main class="page" aria-label="Option chain">
-  <header class="top" data-testid="page-header">
-    <h1>Option chain</h1>
-    @if (live && signedInAs(); as uid) {
-      <span class="who">{{ uid }}</span>
-    }
-    <oc-theme-toggle />
-    @if (live) {
-      <button type="button" class="logout" data-testid="logout" (click)="logout()">Log out</button>
-    }
-  </header>
+  <h1 class="sr">Option chain</h1>
   <oc-underlying-bar
     [quick]="quick()"
     [selected]="selected()"
@@ -20,12 +11,16 @@
     [resultsFor]="resultsFor()"
     (select)="onSelectUnderlying($event)"
     (search)="onSearch($event)"
-  />
+  >
+    <!-- Page tools sit at the right of the search box (no separate title row). -->
+    <oc-theme-toggle />
+  </oc-underlying-bar>
 
   <oc-view-toolbar
     [presetId]="presetId()"
     [customEditorOpen]="showEditor()"
     [strikeCount]="prefs().strikeCount"
+    [notice]="notice()"
     (presetChange)="onPreset($event)"
     (editColumns)="editorOpen.set(true)"
     (strikeCountChange)="onStrikeCount($event)"
@@ -44,7 +39,7 @@
     />
   }
 
-  <oc-status-banner [kind]="bannerKind()" [sym]="selected().sym" (retry)="retry()" />
+  <oc-status-banner [kind]="alertKind()" [sym]="selected().sym" (retry)="retry()" />
 
   @if (showEditor()) {
     <oc-column-chooser
@@ -70,16 +65,43 @@
     [loading]="tableLoading()"
     (trade)="onTrade($event)"
     (toggleCheck)="onToggleCheck($event)"
+    (contractAction)="onContractAction($event)"
   />
 
-  <oc-footer-actions
-    [checkedCount]="checked().size"
-    [fwd]="footer().fwd"
-    [atm]="footer().atm"
-    [expiryLabel]="footer().expiry"
-    (addToWatchlist)="onAddToWatchlist()"
-    (addToBasket)="onAddToBasket()"
-  />
+  <!-- The strategy pop-up floats just above the footer (after it in the DOM, so Tab goes from its button into it). -->
+  <div class="foot">
+    <oc-footer-actions
+      [checkedCount]="checked().size"
+      [strategyOpen]="strategyOpen()"
+      (addToWatchlist)="onAddToWatchlist()"
+      (addToBasket)="onAddToBasket()"
+      (buildStrategy)="onBuildStrategy()"
+    />
+    @if (strategyOpen()) {
+      <oc-strategy-panel
+        class="strategy"
+        [sym]="selected().sym"
+        [strategy]="strategy.current()"
+        [live]="store.legPrices()"
+        [margin]="margin.state()"
+        [expiries]="store.expiries()"
+        [pickerFor]="pickerFor()"
+        [marketOpen]="session.isOpen()"
+        [placing]="placing()"
+        (edit)="strategy.update($event.id, $event.edit)"
+        (remove)="strategy.remove($event)"
+        (clearAll)="strategy.clear()"
+        (swap)="onSwap($event)"
+        (lotMultiplier)="strategy.setLotMultiplier($event)"
+        (product)="strategy.setProduct($event)"
+        (resetPrices)="strategy.resetPrices(store.legPrices())"
+        (retryMargin)="margin.retry()"
+        (saveToBasket)="onSaveToBasket()"
+        (execute)="onExecute()"
+        (collapse)="onCollapseStrategy()"
+      />
+    }
+  </div>
 </main>
 
 @if (statusLine(); as line) {

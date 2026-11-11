@@ -43,6 +43,38 @@ const money = (v: number | null | undefined): string =>
           </button>
         }
       </div>
+      <!-- Selected underlying: price, change, and the day's OHLC as one horizontal candle (TradingView-style). -->
+      <div class="und-bar">
+        <b>{{ selected().sym }}</b>
+        <span class="exch">{{ selected().exch }}</span>
+        @if (ltp() !== null) {
+          <span class="px" data-testid="underlying-ltp">{{ fmt(ltp()) }}</span>
+          @if (change(); as c) {
+            <span class="chg" [class]="'chg ' + c.cls">{{ c.text }}</span>
+          }
+        }
+        @if (candle(); as k) {
+          <div class="ohlc" data-testid="ohlc-candle" role="img" [attr.aria-label]="k.label" [attr.title]="k.label">
+            <span class="end">L {{ fmt(ohlc().low) }}</span>
+            <span class="track">
+              <span class="wick"></span>
+              @if (k.open !== null && k.close !== null) {
+                <span [class]="'body ' + k.cls" [style.left.%]="k.bodyLeft" [style.width.%]="k.bodyWidth"></span>
+              }
+              @if (k.open !== null) {
+                <span class="tick" [style.left.%]="k.open"></span>
+              }
+              @if (k.close !== null) {
+                <span [class]="'dot ' + k.cls" [style.left.%]="k.close"></span>
+              }
+            </span>
+            <span class="end">H {{ fmt(ohlc().high) }}</span>
+          </div>
+        }
+        @if (lotSize() !== null) {
+          <span class="lot" title="Lot size for this expiry">Lot <b>{{ lotSize() }}</b></span>
+        }
+      </div>
       <div class="search">
         <label class="sr" [for]="inputId">Search index or stock</label>
         <input
@@ -78,25 +110,7 @@ const money = (v: number | null | undefined): string =>
           <p class="none" role="status">No index or stock with options matches "{{ text().trim() }}"</p>
         }
       </div>
-    </div>
-    <div class="und-bar">
-      <b>{{ selected().sym }}</b>
-      <span class="exch">{{ selected().exch }}</span>
-      @if (ltp() !== null) {
-        <span class="px" data-testid="underlying-ltp">{{ fmt(ltp()) }}</span>
-        @if (change(); as c) {
-          <span class="chg" [class]="'chg ' + c.cls">{{ c.text }}</span>
-        }
-      }
-      <div class="ohlc">
-        <span>O <b>{{ fmt(ohlc().open) }}</b>&ngsp;</span>
-        <span>H <b>{{ fmt(ohlc().high) }}</b>&ngsp;</span>
-        <span>L <b>{{ fmt(ohlc().low) }}</b>&ngsp;</span>
-        <span>Prev close <b>{{ fmt(ohlc().prevClose) }}</b>&ngsp;</span>
-        @if (lotSize() !== null) {
-          <span>Lot <b>{{ lotSize() }}</b> (this expiry)&ngsp;</span>
-        }
-      </div>
+      <div class="tools"><ng-content /></div>
     </div>
   `,
   styles: `
@@ -116,6 +130,7 @@ const money = (v: number | null | undefined): string =>
     .qbtn:focus-visible, input:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; }
     .pos { color: var(--ts-green); }
     .neg { color: var(--ts-red); }
+    .tools { display: flex; align-items: center; gap: 10px; }
     .search { position: relative; margin-left: auto; flex: 0 1 300px; min-width: 200px; }
     .search input {
       width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 7px 10px;
@@ -131,12 +146,23 @@ const money = (v: number | null | undefined): string =>
     .search li[aria-selected='true'], .search li:hover { background: var(--ts-blue-soft); }
     .none { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; margin: 0; padding: 8px 10px; font-size: 13px;
       color: var(--ts-muted); background: var(--ts-bg); border: 1px solid var(--ts-line); border-radius: 8px; }
-    .und-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 22px; padding: 10px 14px; border-bottom: 1px solid var(--ts-line); }
+    .und-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; }
     .px { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
     .chg { font-size: 12.5px; font-variant-numeric: tabular-nums; }
     .exch { font-size: 11px; font-weight: 600; color: var(--ts-muted); border: 1px solid var(--ts-line); border-radius: 4px; padding: 0 5px; }
-    .ohlc { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--ts-muted); font-variant-numeric: tabular-nums; }
-    .ohlc b { color: var(--ts-fg); font-weight: 500; }
+    /* Day's range as a horizontal candle: the wick runs low to high, the body open to last price (green up, red down),
+       a tick marks the open and a dot the last price. All values are in the tooltip and the accessible name. */
+    .ohlc { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ts-muted); font-variant-numeric: tabular-nums; cursor: default; }
+    .track { position: relative; width: 140px; height: 12px; }
+    .wick { position: absolute; left: 0; right: 0; top: 50%; height: 2px; transform: translateY(-50%); border-radius: 1px; background: var(--ts-muted); opacity: 0.5; }
+    .body { position: absolute; top: 50%; height: 6px; min-width: 2px; transform: translateY(-50%); border-radius: 1px; }
+    .body.pos, .dot.pos { background: var(--ts-green); }
+    .body.neg, .dot.neg { background: var(--ts-red); }
+    .body.flat, .dot.flat { background: var(--ts-muted); }
+    .tick { position: absolute; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); background: var(--ts-fg); opacity: 0.6; }
+    .dot { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--ts-bg); }
+    .lot { font-size: 12px; color: var(--ts-muted); }
+    .lot b { color: var(--ts-fg); font-weight: 500; }
   `,
 })
 export class UnderlyingBarComponent {
@@ -175,6 +201,27 @@ export class UnderlyingBarComponent {
     const sign = d > 0 ? '+' : d < 0 ? '-' : '';
     const pct = (Math.abs(d) / pc) * 100;
     return { text: `${sign}${money(Math.abs(d))} (${sign}${pct.toFixed(2)}%)`, cls: d > 0 ? 'pos' : d < 0 ? 'neg' : '' };
+  });
+  /**
+   * The day's OHLC as positions (% of the low-high range) for the candle; the close is the last price. Null until the
+   * low and high are known and differ.
+   */
+  protected readonly candle = computed(() => {
+    const { open, high, low, prevClose } = this.ohlc();
+    if (low === null || high === null || !(high > low)) return null;
+    const last = this.ltp();
+    const pct = (v: number): number => Math.round(Math.min(1, Math.max(0, (v - low) / (high - low))) * 10000) / 100;
+    const o = open === null ? null : pct(open);
+    const c = last === null ? null : pct(last);
+    const cls = open === null || last === null || last === open ? 'flat' : last > open ? 'pos' : 'neg';
+    const parts = [`Open ${money(open)}`, `High ${money(high)}`, `Low ${money(low)}`, `Last ${money(last)}`];
+    if (prevClose !== null) parts.push(`Prev close ${money(prevClose)}`);
+    return {
+      open: o, close: c, cls,
+      bodyLeft: o === null || c === null ? 0 : Math.min(o, c),
+      bodyWidth: o === null || c === null ? 0 : Math.abs(c - o),
+      label: `Day range: ${parts.join(', ')}`,
+    };
   });
   protected readonly listOpen = computed(() => this.open() && this.fresh() && this.searchResults().length > 0);
   protected readonly activeIdx = computed(() =>

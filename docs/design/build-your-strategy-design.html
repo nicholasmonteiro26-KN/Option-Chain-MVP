@@ -1,0 +1,337 @@
+<title>Build Your Strategy Spec</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column of decisions, with the pop-up mock-up set wide as the centrepiece. Option-chain colours. */
+:root {
+  --bg: #ffffff;
+  --bg2: #f4f6fa;
+  --fg: #1d2433;
+  --muted: #5f6878;
+  --line: #e2e6ee;
+  --blue: #3f71eb;
+  --blue-soft: #e8eefd;
+  --green: #39b00e;
+  --green-soft: #e8f6e2;
+  --red: #e83937;
+  --red-soft: #fde9e9;
+  --warn: #9a6200;
+  --warn-soft: #fff4dc;
+  --shadow: rgba(16, 24, 40, 0.16);
+  --font: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0a1222; --bg2: #121c31; --fg: #e6e9ef; --muted: #9aa3b5; --line: #24304a;
+    --blue: #7fa2f5; --blue-soft: #1a2a4d; --green: #5cc935; --green-soft: #15301a; --red: #f06462; --red-soft: #3a1a1d;
+    --warn: #f0b545; --warn-soft: #3a2c10; --shadow: rgba(0, 0, 0, 0.5); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0a1222; --bg2: #121c31; --fg: #e6e9ef; --muted: #9aa3b5; --line: #24304a;
+  --blue: #7fa2f5; --blue-soft: #1a2a4d; --green: #5cc935; --green-soft: #15301a; --red: #f06462; --red-soft: #3a1a1d;
+  --warn: #f0b545; --warn-soft: #3a2c10; --shadow: rgba(0, 0, 0, 0.5); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font: 400 15px/1.6 var(--font);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 72px;
+}
+.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 40px; }
+.col { max-width: 72ch; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+h1 { font-size: 32px; line-height: 1.2; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 21px; margin: 0 0 12px; font-weight: 700; text-wrap: balance; }
+h3 { font-size: 16px; margin: 18px 0 6px; font-weight: 500; }
+p { margin: 0 0 10px; }
+ul, ol { margin: 0 0 10px; padding-left: 22px; }
+li { margin-bottom: 4px; }
+code { font: 13px var(--mono); background: var(--bg2); padding: 1px 5px; border-radius: 3px; }
+.lede { font-size: 17px; color: var(--muted); max-width: 66ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+.meta b { color: var(--fg); font-weight: 500; }
+
+.decisions { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.dec { border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; display: grid; gap: 4px; align-content: start; }
+.dec .k { font-size: 12px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.dec .v { font-weight: 500; }
+.dec .w { font-size: 13px; color: var(--muted); }
+
+/* ---- Mock-up stage: a slice of the chain with the pop-up open at the bottom right ---- */
+.stage { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+.stage-scroll { overflow-x: auto; }
+.screen { position: relative; min-width: 900px; height: 520px; background: var(--bg); font-size: 12.5px; }
+.chain { position: absolute; inset: 0 0 52px 0; overflow: hidden; }
+.chain table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.chain th { background: var(--bg2); color: var(--muted); font-weight: 600; font-size: 11.5px; padding: 8px 10px; text-align: center; position: relative; }
+.chain td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: center; color: var(--muted); }
+.chain td.k { color: var(--fg); font-weight: 600; }
+.chip-ce, .chip-pe { font-size: 11px; font-weight: 600; border: 1px solid currentColor; border-radius: 4px; padding: 1px 4px; }
+.chip-ce { color: var(--red); background: var(--red-soft); }
+.chip-pe { color: var(--green); background: var(--green-soft); }
+.tk { display: inline-block; width: 13px; height: 13px; border: 1px solid var(--line); border-radius: 3px; vertical-align: -2px; }
+.tk.on { background: var(--blue); border-color: var(--blue); }
+.foot { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; padding: 0 14px; }
+.fbtn { border: 1px solid var(--line); border-radius: 4px; padding: 7px 10px; font: 500 12.5px var(--font); text-transform: uppercase; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; background: var(--bg); }
+.fbtn .n { background: var(--bg2); border-radius: 999px; padding: 1px 6px; font-size: 10px; }
+.fbtn.primary { margin-left: auto; color: var(--blue); border-color: var(--blue); }
+.fbtn.primary .n { background: var(--blue-soft); }
+
+.pop {
+  position: absolute; right: 14px; bottom: 60px; width: 600px; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 14px 40px -12px var(--shadow); font-size: 12.5px; display: grid;
+}
+.pop-h { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.pop-h b { font-size: 14px; }
+.pop-h .sp { margin-left: auto; color: var(--muted); font-size: 16px; }
+.legs { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.legs th { font-weight: 500; font-size: 11.5px; color: var(--muted); padding: 7px 6px; text-align: left; }
+.legs td { padding: 6px; border-top: 1px solid var(--line); vertical-align: middle; }
+.bs { display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; border-radius: 4px; font-weight: 700; color: #fff; font-size: 12px; }
+.bs.b { background: var(--blue); }
+.bs.s { background: var(--red); }
+.fld { display: inline-block; border: 1px solid var(--line); border-radius: 4px; padding: 3px 7px; background: var(--bg); white-space: nowrap; }
+.fld.caret::after { content: ' ▾'; color: var(--muted); font-size: 10px; }
+.step { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; }
+.step span { padding: 3px 7px; }
+.step span:first-child, .step span:last-child { color: var(--muted); }
+.price { display: inline-flex; align-items: center; gap: 4px; }
+.mkt { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px; }
+.live { display: block; font-size: 10.5px; color: var(--muted); }
+.del { color: var(--muted); }
+.sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--bg2); }
+.sum .k { font-size: 11px; color: var(--muted); }
+.sum .v { font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+.act { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.act .push { margin-left: auto; }
+.btn { border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; font: 500 12.5px var(--font); background: var(--bg); color: var(--fg); }
+.btn.go { background: var(--blue); border-color: var(--blue); color: #fff; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg span { padding: 5px 9px; }
+.seg span.on { background: var(--blue-soft); color: var(--blue); font-weight: 500; }
+
+.callouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 22px; padding: 16px 18px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.callouts div { display: grid; grid-template-columns: 22px 1fr; gap: 6px; }
+.callouts i { font-style: normal; width: 20px; height: 20px; border-radius: 50%; background: var(--fg); color: var(--bg); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Execute flow */
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; counter-reset: s; }
+.fs { border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; }
+.fs h3 { margin-top: 0; }
+.fs h3::before { counter-increment: s; content: counter(s) '. '; color: var(--muted); }
+.status { display: grid; gap: 6px; font-size: 13px; margin-top: 8px; }
+.st { display: flex; gap: 8px; align-items: center; font-variant-numeric: tabular-nums; }
+.pill { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px; }
+.pill.ok { background: var(--green-soft); color: var(--green); }
+.pill.bad { background: var(--red-soft); color: var(--red); }
+.pill.skip { background: var(--bg2); color: var(--muted); }
+
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+table.spec { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.spec th { text-align: left; background: var(--bg2); font-weight: 500; padding: 8px 12px; white-space: nowrap; }
+table.spec td { padding: 8px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+table.spec td:first-child { white-space: nowrap; }
+
+.note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; font-size: 14px; }
+.out li { color: var(--muted); }
+@media (max-width: 560px) { h1 { font-size: 26px; } .sum { grid-template-columns: 1fr 1fr; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">Option chain · feature spec · 9 Nov 2026</span>
+    <h1>Build your strategy</h1>
+    <p class="lede">A pop-up at the bottom right of the option chain that turns the ticked strikes into an editable strategy. The user sees the margin and premium, edits each leg in place, then saves it to a TradeSmart basket or places all the orders. Today, editing a basket means leaving the chain for the order book.</p>
+    <div class="meta"><span>Reference: <b>Dhan advanced option chain</b></span><span>Data: <b>Kambala API only</b></span><span>Status: <b>awaiting review</b></span></div>
+  </header>
+
+  <section class="col">
+    <h2>Decisions already made</h2>
+    <div class="decisions">
+      <div class="dec"><span class="k">Basket link</span><span class="v">Working strategy + Save to basket</span><span class="w">The pop-up owns its legs. "Save to basket" hands the edited legs to TradeSmart's basket picker.</span></div>
+      <div class="dec"><span class="k">Execute all</span><span class="v">Kambala PlaceOrder, after a confirm</span><span class="w">Buys first, then sells. Per-leg result shown in the pop-up. Demo mode only simulates.</span></div>
+      <div class="dec"><span class="k">Not in this version</span><span class="v">See in Builder, drag to reorder</span><span class="w">"See in Builder" arrives with the Strategy Builder (sub-project #2).</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="col"><h2>The pop-up</h2>
+    <p>It opens from the new <b>Build your strategy</b> button at the bottom right. It doesn't block the chain, so the user can keep ticking strikes while it's open. The arrow at the top folds it away; the legs stay.</p></div>
+    <div class="stage" role="img" aria-label="Mock-up: option chain with the strategy pop-up open at the bottom right, showing three legs, the margin summary and the action row">
+      <div class="stage-scroll">
+        <div class="screen">
+          <div class="chain">
+            <table>
+              <thead><tr><th>OI (In Lacs)</th><th>Bid</th><th>Ask</th><th>LTP <span class="chip-ce">CE</span></th><th>Strike</th><th><span class="chip-pe">PE</span> LTP</th><th>Ask</th><th>Bid</th><th>OI (In Lacs)</th></tr></thead>
+              <tbody>
+                <tr><td>17.03</td><td>102.10</td><td>102.20</td><td>102.15 <span class="tk"></span></td><td class="k">22800</td><td><span class="tk"></span> 26.25</td><td>26.30</td><td>26.20</td><td>15.26</td></tr>
+                <tr><td>15.58</td><td>69.85</td><td>69.95</td><td>69.90 <span class="tk on"></span></td><td class="k">22850</td><td><span class="tk"></span> 44.60</td><td>44.65</td><td>44.55</td><td>10.20</td></tr>
+                <tr><td>37.98</td><td>45.35</td><td>45.45</td><td>45.40 <span class="tk"></span></td><td class="k">22900</td><td><span class="tk on"></span> 68.85</td><td>68.90</td><td>68.80</td><td>8.96</td></tr>
+                <tr><td>26.31</td><td>26.85</td><td>26.95</td><td>26.90 <span class="tk"></span></td><td class="k">22950</td><td><span class="tk"></span> 100.35</td><td>100.40</td><td>100.30</td><td>4.23</td></tr>
+                <tr><td>64.16</td><td>14.90</td><td>15.00</td><td>14.95 <span class="tk on"></span></td><td class="k">23000</td><td><span class="tk"></span> 138.05</td><td>138.10</td><td>138.00</td><td>7.15</td></tr>
+                <tr><td>30.67</td><td>7.45</td><td>7.55</td><td>7.50 <span class="tk"></span></td><td class="k">23050</td><td><span class="tk"></span> 181.65</td><td>181.70</td><td>181.60</td><td>3.07</td></tr>
+                <tr><td>49.29</td><td>3.35</td><td>3.45</td><td>3.40 <span class="tk"></span></td><td class="k">23100</td><td><span class="tk"></span> 226.45</td><td>226.50</td><td>226.40</td><td>2.84</td></tr>
+                <tr><td>20.12</td><td>1.40</td><td>1.50</td><td>1.45 <span class="tk"></span></td><td class="k">23150</td><td><span class="tk"></span> 271.10</td><td>271.20</td><td>271.00</td><td>1.92</td></tr>
+                <tr><td>18.40</td><td>0.75</td><td>0.80</td><td>0.75 <span class="tk"></span></td><td class="k">23200</td><td><span class="tk"></span> 318.30</td><td>318.40</td><td>318.20</td><td>1.10</td></tr>
+                <tr><td>11.02</td><td>0.40</td><td>0.45</td><td>0.40 <span class="tk"></span></td><td class="k">23250</td><td><span class="tk"></span> 366.05</td><td>366.10</td><td>366.00</td><td>0.84</td></tr>
+                <tr><td>9.77</td><td>0.25</td><td>0.30</td><td>0.25 <span class="tk"></span></td><td class="k">23300</td><td><span class="tk"></span> 414.60</td><td>414.70</td><td>414.50</td><td>0.61</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pop">
+            <div class="pop-h"><b>Your strategy · NIFTY</b><span class="fld">3 legs</span><span class="sp">⌄</span></div>
+            <table class="legs">
+              <thead><tr><th><span class="tk on"></span></th><th>B/S</th><th>Expiry</th><th>Strike</th><th>Type</th><th>Lots</th><th>Price ↻</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><span class="tk on"></span></td><td><span class="bs s">S</span></td><td><span class="fld caret">10 Nov</span></td><td><span class="fld caret">22850</span></td><td><span class="chip-ce">CE</span></td><td><span class="step"><span>−</span><span>1</span><span>+</span></span></td><td><span class="price"><span class="fld">69.90</span><span class="mkt">MKT</span></span><span class="live">Live 69.90</span></td><td class="del">🗑</td></tr>
+                <tr><td><span class="tk on"></span></td><td><span class="bs s">S</span></td><td><span class="fld caret">10 Nov</span></td><td><span class="fld caret">22900</span></td><td><span class="chip-pe">PE</span></td><td><span class="step"><span>−</span><span>1</span><span>+</span></span></td><td><span class="price"><span class="fld">68.85</span><span class="mkt">MKT</span></span><span class="live">Live 68.85</span></td><td class="del">🗑</td></tr>
+                <tr><td><span class="tk on"></span></td><td><span class="bs b">B</span></td><td><span class="fld caret">10 Nov</span></td><td><span class="fld caret">23000</span></td><td><span class="chip-ce">CE</span></td><td><span class="step"><span>−</span><span>1</span><span>+</span></span></td><td><span class="price"><span class="fld">14.95</span><span class="mkt">MKT</span></span><span class="live">Live 14.95</span></td><td class="del">🗑</td></tr>
+              </tbody>
+            </table>
+            <div class="sum">
+              <div><div class="k">Margin needed</div><div class="v">₹ 1,18,420</div></div>
+              <div><div class="k">Hedge benefit</div><div class="v pos">₹ 96,310</div></div>
+              <div><div class="k">Net premium</div><div class="v pos">+ ₹ 8,005</div></div>
+            </div>
+            <div class="act">
+              <span>Lot ×</span><span class="step"><span>−</span><span>1</span><span>+</span></span>
+              <span class="seg"><span class="on">Intraday</span><span>Normal</span></span>
+              <span class="btn push">Save to basket</span>
+              <span class="btn go">Execute all</span>
+            </div>
+          </div>
+
+          <div class="foot">
+            <span class="fbtn">◎ Add to Watchlist <span class="n">3</span></span>
+            <span class="fbtn">⊔ Add to Basket <span class="n">3</span></span>
+            <span class="fbtn primary">Build your strategy <span class="n">3</span></span>
+          </div>
+        </div>
+      </div>
+      <div class="callouts">
+        <div><i>1</i><span><b>Ticks are legs.</b> The three ticked contracts are the three legs. Deleting a leg unticks it, and unticking removes the leg.</span></div>
+        <div><i>2</i><span><b>Every leg is editable in place:</b> B/S, expiry, strike, CE/PE, lots and price. The include box leaves a leg out of margin and execution without deleting it.</span></div>
+        <div><i>3</i><span><b>Price</b> is a limit price, prefilled with the live price. MKT switches the leg to a market order. ↻ resets every limit to the live price.</span></div>
+        <div><i>4</i><span><b>Summary</b> comes from Kambala's basket margin. Net premium is + when the strategy receives money and − when it pays.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="col">
+    <h2>How legs behave</h2>
+    <ul>
+      <li><b>A new leg</b> is a Buy of 1 lot, with a limit price set to the live price at the moment it's ticked.</li>
+      <li><b>Editing strike, expiry or CE/PE</b> swaps the leg to that contract, and the ticks in the chain follow. The pickers offer only contracts that exist; other expiries are loaded the same way the chain loads them.</li>
+      <li><b>Live prices for every leg.</b> A leg from an expiry the chain isn't showing stays subscribed, so its "Live" price keeps updating.</li>
+      <li><b>Quantity sent</b> = lots × Lot× × the contract's own lot size (read per contract, never hard-coded). The row shows the quantity on hover, e.g. "2 lots × 65 = 130".</li>
+      <li><b>One strategy per underlying.</b> Switching from NIFTY to SENSEX shows SENSEX's legs, and NIFTY's come back when the user returns. Legs are kept in this browser tab's session storage (per user), so they survive a refresh and are cleared on log out.</li>
+      <li><b>Up to 10 legs.</b> An 11th tick shows "A strategy holds up to 10 legs" and doesn't tick. This keeps margin requests small.</li>
+      <li><b>Add to Watchlist / Add to Basket</b> in the footer still work exactly as today, on the same ticked contracts.</li>
+    </ul>
+  </section>
+
+  <section class="col">
+    <h2>Margin and premium</h2>
+    <ul>
+      <li><b>Margin needed:</b> one <code>GetBasketMargin</code> call with every included leg (first leg at top level, the rest in <code>basketlists</code>). The figure shown is <code>marginused</code>.</li>
+      <li><b>Hedge benefit:</b> the sum of each leg's margin on its own minus the combined margin. That's one extra call per leg, made only when the legs change, not on price ticks.</li>
+      <li><b>Net premium:</b> Σ (sell price − buy price) × quantity, using each leg's limit price, or the live price for MKT legs. Worked out in the browser; no call needed.</li>
+      <li><b>When it's asked for:</b> 400 ms after the last edit, with a newer request replacing an older one. While waiting, the figures show "…". If Kambala fails, they show "Margin unavailable" with a retry; Execute all stays usable, because Kambala's own order check still applies.</li>
+      <li>For margin, an MKT leg sends <code>prctyp=MKT</code> with <code>prc</code> set to the live price.</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="col"><h2>Execute all</h2></div>
+    <div class="flow">
+      <div class="fs"><h3>Confirm</h3><p>The pop-up turns into a confirmation step. It lists each included leg (side, contract, quantity, price or MKT), the margin needed and the product, then shows <b>Place 3 orders</b> and <b>Back</b>. This is not a browser dialog.</p></div>
+      <div class="fs"><h3>Place, buys first</h3><p>Orders go one at a time with <code>PlaceOrder</code>: all buys, then all sells, in listed order within each group. Buying the hedge first lets the margin benefit apply to the short legs.</p></div>
+      <div class="fs"><h3>Stop on a rejection</h3><p>If Kambala rejects a leg, the remaining legs aren't sent. Orders already placed stay placed; nothing is cancelled automatically.</p></div>
+      <div class="fs"><h3>Show the result</h3>
+        <div class="status">
+          <div class="st"><span class="pill ok">Placed</span> B 23000 CE · #26110900123</div>
+          <div class="st"><span class="pill bad">Rejected</span> S 22850 CE · RMS: insufficient margin</div>
+          <div class="st"><span class="pill skip">Not sent</span> S 22900 PE</div>
+        </div>
+        <p style="margin-top:8px">Placed legs stay in the strategy so the user can see what went through.</p></div>
+    </div>
+    <div class="col" style="margin-top:16px">
+      <ul>
+        <li><b>While the market is closed</b>, Execute all is off with the note "Market closed". After-market orders are out of scope for this version.</li>
+        <li><b>Demo mode</b> (<code>?feed=mock</code>) never calls Kambala. A mock client returns a simulated margin and simulated order numbers.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="col">
+    <h2>Kambala request fields</h2>
+    <div class="tbl">
+      <table class="spec">
+        <thead><tr><th>Field</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td><code>exch</code>, <code>tsym</code></td><td>From the leg's contract (NFO or BFO)</td></tr>
+          <tr><td><code>qty</code></td><td>lots × Lot× × contract lot size</td></tr>
+          <tr><td><code>prc</code></td><td>Limit price; for MKT, "0" on PlaceOrder and the live price on GetBasketMargin</td></tr>
+          <tr><td><code>prctyp</code></td><td><code>LMT</code> or <code>MKT</code></td></tr>
+          <tr><td><code>trantype</code></td><td><code>B</code> / <code>S</code></td></tr>
+          <tr><td><code>prd</code></td><td>Intraday → <code>I</code>, Normal → <code>M</code> (NRML)</td></tr>
+          <tr><td><code>ret</code></td><td><code>DAY</code></td></tr>
+          <tr><td><code>remarks</code></td><td><code>OC-STRATEGY</code>, so these orders can be found in the order book</td></tr>
+          <tr><td><code>uid</code>, <code>actid</code></td><td>From the signed-in session; the session token is never logged</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="col">
+    <h2>How it's built</h2>
+    <div class="tbl">
+      <table class="spec">
+        <thead><tr><th>Unit</th><th>Job</th></tr></thead>
+        <tbody>
+          <tr><td><code>StrategyStore</code></td><td>Signal store for the legs of each underlying: add, remove, edit, include, Lot×, product, persistence. It is the single source for the chain's ticks.</td></tr>
+          <tr><td><code>OrdersClient</code></td><td><code>basketMargin(legs)</code> and <code>placeOrder(leg)</code> over Kambala REST, plus a mock for demo mode.</td></tr>
+          <tr><td><code>StrategyMarginService</code></td><td>Debounced margin and hedge-benefit requests, ignoring stale answers.</td></tr>
+          <tr><td><code>StrategyPanelComponent</code></td><td>The pop-up: leg rows, summary, action row, the confirmation step and per-leg results.</td></tr>
+          <tr><td><code>FooterActionsComponent</code></td><td>Gains the "Build your strategy (n)" button at the right.</td></tr>
+          <tr><td>Page</td><td><code>checked</code> is now read from <code>StrategyStore</code>. "Save to basket" is an INTEGRATION point: <code>BasketService.add(legs)</code>, with side, qty, price and product per leg.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>Tests</h3>
+    <ul>
+      <li>Store: tick and untick sync, edits that swap the contract, the 10-leg cap, per-underlying switching, session restore and clear on log out.</li>
+      <li>Margin: the request shape (top-level leg plus <code>basketlists</code>), debounce, stale answers ignored, hedge benefit, failure state.</li>
+      <li>Execute: buys before sells, stop after a rejection, per-leg status, off while the market is closed, mock never calls Kambala.</li>
+      <li>Panel: keyboard use (every control reachable, Esc folds the pop-up), the include box, Market switch, ↻ reset.</li>
+    </ul>
+  </section>
+
+  <section class="col">
+    <h2>For the tech team to confirm</h2>
+    <div class="note">
+      <ul style="margin:0">
+        <li>The exact <code>PlaceOrder</code> / <code>GetBasketMargin</code> paths on TradeSmart's v2 base. The doc lists <code>/NorenWClientTP/…</code>; the chain uses the v2 REST base.</li>
+        <li>Whether <code>I</code> (intraday) is in the account's allowed products (<code>prarr</code>) for NFO and BFO.</li>
+        <li>BFO market orders need <code>mkt_protection</code>. Until a value is agreed, the MKT switch is hidden on BFO (SENSEX) legs, which stay limit-only.</li>
+        <li>Orders larger than the exchange freeze quantity are rejected by Kambala and shown as Rejected. Splitting them is out of scope.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="col">
+    <h2>Out of scope</h2>
+    <ul class="out">
+      <li>See in Builder (comes with the Strategy Builder), payoff chart, drag to reorder legs</li>
+      <li>After-market orders, stop-loss order types, splitting above the freeze quantity</li>
+      <li>Editing TradeSmart's saved baskets in place (that stays in the order book)</li>
+    </ul>
+  </section>
+</div>

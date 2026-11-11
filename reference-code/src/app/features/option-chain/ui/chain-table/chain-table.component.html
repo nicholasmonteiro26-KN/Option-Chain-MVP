@@ -1,23 +1,21 @@
-<div class="tbl-wrap" data-testid="chain-table">
+<div class="tbl-wrap" data-testid="chain-table" tabindex="-1">
   <table class="oc">
     <thead #head>
       @if (mirrored()) {
+        <!-- One header row (as on Dhan): CE / PE chips sit either side of Strike, above each side's checkboxes. -->
         <tr>
-          <th class="side-h" [attr.colspan]="ceCols().length + 1">Calls</th>
-          <th class="k"></th>
-          <th class="side-h" [attr.colspan]="peCols().length + 1">Puts</th>
-        </tr>
-        <tr>
-          <th></th>
-          @for (c of ceCols(); track c.id) { <th [attr.title]="c.title ?? null">{{ c.label }}</th> }
-          <th class="k">Strike</th>
-          @for (c of peCols(); track c.id) { <th [attr.title]="c.title ?? null">{{ c.label }}</th> }
-          <th></th>
+          @for (c of ceCols(); track c.id; let last = $last) {
+            <th [class.in-ce]="last" [attr.title]="c.title ?? null"><ng-container *ngTemplateOutlet="headTpl; context: { $implicit: c }" />@if (last) {<span class="side ce" data-testid="side-ce" title="Calls">CE</span>}</th>
+          }
+          <th class="k" [attr.aria-sort]="descending() ? 'descending' : 'ascending'"><ng-container *ngTemplateOutlet="sortTpl" /></th>
+          @for (c of peCols(); track c.id; let first = $first) {
+            <th [class.in-pe]="first" [attr.title]="c.title ?? null">@if (first) {<span class="side pe" data-testid="side-pe" title="Puts">PE</span>}<ng-container *ngTemplateOutlet="headTpl; context: { $implicit: c }" /></th>
+          }
         </tr>
       } @else {
         <tr>
-          <th class="k">Strike</th>
-          @for (c of ceCols(); track c.id) { <th [attr.title]="c.title ?? null">{{ c.label }}</th> }
+          <th class="k" [attr.aria-sort]="descending() ? 'descending' : 'ascending'"><ng-container *ngTemplateOutlet="sortTpl" /></th>
+          @for (c of ceCols(); track c.id) { <th [attr.title]="c.title ?? null"><ng-container *ngTemplateOutlet="headTpl; context: { $implicit: c }" /></th> }
         </tr>
       }
     </thead>
@@ -27,11 +25,9 @@
         @for (i of skeleton(); track i) {
           <tr class="skel">
             @if (mirrored()) {
-              <td class="chk"></td>
               @for (id of skeletonCols(); track id) { <td></td> }
               <td class="k"></td>
               @for (id of skeletonCols(); track id) { <td></td> }
-              <td class="chk"></td>
             } @else {
               <td class="k"></td>
               @for (id of skeletonCols(); track id) { <td></td> }
@@ -40,27 +36,23 @@
         }
       } @else {
         @for (row of rows(); track row.strike) {
-          <tr>
+          @if (row.spotBefore) {
+            <ng-container *ngTemplateOutlet="spotTpl" />
+          }
+          <tr [class.oi-row]="mirrored()">
             @if (mirrored()) {
-              <td class="chk">
-                @if (row.ceToken; as t) {
-                  <input type="checkbox" [checked]="checked().has(t)" (change)="toggleCheck.emit(t)"
-                    [attr.aria-label]="'Select ' + row.strike + ' CE'">
-                }
-              </td>
               @for (c of row.ce; track c.id) {
                 <ng-container *ngTemplateOutlet="cellTpl; context: { $implicit: c, side: 'ce' }" />
               }
-              <td class="k" [class.atm]="row.atm"><span class="chip">{{ row.strike }}</span></td>
+              <!-- The OI lines are positioned against the row (this cell is not positioned). -->
+              <td class="k" [class.atm]="row.atm">
+                <span class="chip">{{ row.strike }}</span>
+                <span class="oil ce" [style.width.%]="row.ceOi" aria-hidden="true"></span>
+                <span class="oil pe" [style.width.%]="row.peOi" aria-hidden="true"></span>
+              </td>
               @for (c of row.pe; track c.id) {
                 <ng-container *ngTemplateOutlet="cellTpl; context: { $implicit: c, side: 'pe' }" />
               }
-              <td class="chk">
-                @if (row.peToken; as t) {
-                  <input type="checkbox" [checked]="checked().has(t)" (change)="toggleCheck.emit(t)"
-                    [attr.aria-label]="'Select ' + row.strike + ' PE'">
-                }
-              </td>
             } @else {
               <td class="k" [class.atm]="row.atm"><span class="chip">{{ row.strike }}</span></td>
               @for (c of row.cells; track c.id) {
@@ -69,49 +61,101 @@
             }
           </tr>
           @if (row.spotAfter) {
-            <tr class="spot" data-testid="spot-row">
-              @if (mirrored()) {
-                <td [attr.colspan]="ceCols().length + 1"></td>
-                <td><span class="pill">{{ spotLabel() }}</span></td>
-                <td [attr.colspan]="peCols().length + 1"></td>
-              } @else {
-                <td><span class="pill">{{ spotLabel() }}</span></td>
-                <td [attr.colspan]="ceCols().length"></td>
-              }
-            </tr>
+            <ng-container *ngTemplateOutlet="spotTpl" />
           }
         }
       }
     </tbody>
-
-    @if (!loading()) {
-      <tfoot #foot>
-        <tr>
-          @if (mirrored()) {
-            <td></td>
-            @for (s of sums().ce; track s.id) { <td>{{ s.text }}</td> }
-            <td class="k">Σ</td>
-            @for (s of sums().pe; track s.id) { <td>{{ s.text }}</td> }
-            <td></td>
-          } @else {
-            <td class="k">Σ</td>
-            @for (s of sums().total; track s.id) { <td>{{ s.text }}</td> }
-          }
-        </tr>
-      </tfoot>
-    }
   </table>
 </div>
 
+<!-- Spot line between the two strikes around spot (after the lower one ascending, before it descending). -->
+<ng-template #spotTpl>
+  <tr class="spot" data-testid="spot-row">
+    @if (mirrored()) {
+      <td [attr.colspan]="ceCols().length"></td>
+      <td><span class="pill">{{ spotLabel() }}</span></td>
+      <td [attr.colspan]="peCols().length"></td>
+    } @else {
+      <td><span class="pill">{{ spotLabel() }}</span></td>
+      <td [attr.colspan]="ceCols().length"></td>
+    }
+  </tr>
+</ng-template>
+
+<!-- Column header: label, then the unit in small grey type as TradeSmart does ("OI (In Lacs)"). -->
+<ng-template #headTpl let-c>
+  {{ c.label }}@if (c.unit) {<span class="unit"> ({{ c.unit }})</span>}
+</ng-template>
+
+<!-- Strike header: one button flips the strike order; the arrow for the current order is blue (TradeSmart). -->
+<ng-template #sortTpl>
+  <button type="button" class="sort" data-testid="strike-sort" (click)="toggleSort()"
+    [attr.aria-label]="descending() ? 'Sort strikes low to high' : 'Sort strikes high to low'">
+    Strike
+    <svg class="ar" [class.on]="!descending()" width="8" height="10" viewBox="0 0 8 10" aria-hidden="true"><path d="M4 9.2V1.3M1 4.2 4 1.2l3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><svg class="ar" [class.on]="descending()" width="8" height="10" viewBox="0 0 8 10" aria-hidden="true"><path d="M4 .8v7.9M1 5.8l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+</ng-template>
+
 <ng-template #cellTpl let-c let-side="side">
   <td [class]="c.cls" [style.background-size]="c.bar" [attr.title]="c.title" [ocFlash]="c.flash">
+    <!-- Basket checkbox: on the innermost cell of each side, at the edge next to the strike (as on TradeSmart). -->
+    @if (c.check; as k) {
+      <input type="checkbox" class="cb" [class.ce]="side === 'ce'" [class.pe]="side === 'pe'"
+        [checked]="checked().has(k.token)" (change)="onCheck($event, k.token)" [attr.aria-label]="k.label">
+    }
     @if (c.trade) {
       <span class="acts" [class.ce]="side === 'ce'" [class.pe]="side === 'pe'">
         <button type="button" class="b" [attr.aria-label]="c.trade.label.replace('%', 'Buy')" (click)="emitTrade(c.trade, 'BUY')">B</button>
         <button type="button" class="s" [attr.aria-label]="c.trade.label.replace('%', 'Sell')" (click)="emitTrade(c.trade, 'SELL')">S</button>
+        <button type="button" class="ic chart" [attr.aria-label]="c.trade.label.replace('%', 'Chart')"
+          [attr.title]="'Chart'" (click)="emitAction(c.trade, 'chart')">
+          <svg width="16" height="14" viewBox="0 0 16 14" aria-hidden="true"><path fill="currentColor" d="M2 1a1 1 0 0 0-2 0v10.5A2.5 2.5 0 0 0 2.5 14H15a1 1 0 1 0 0-2H2.5a.5.5 0 0 1-.5-.5V1Zm12.71 2.71a1 1 0 0 0-1.42-1.42L10 5.58 8.21 3.79a1 1 0 0 0-1.42 0l-3.5 3.5a1 1 0 0 0 1.42 1.42L7.5 5.92l1.79 1.79a1 1 0 0 0 1.42 0l4-4Z"/></svg>
+        </button>
+        <button type="button" class="ic adv" [attr.aria-label]="c.trade.label.replace('%', 'Advanced chart')"
+          [attr.title]="'Advanced Chart'" (click)="emitAction(c.trade, 'advancedChart')">
+          <ng-container *ngTemplateOutlet="tvIcon" />
+        </button>
+        <button type="button" class="ic more" [attr.aria-label]="c.trade.label.replace('%', 'More actions for')"
+          [attr.title]="'More'" [cdkMenuTriggerFor]="moreMenu" [cdkMenuTriggerData]="{ t: c.trade }">
+          <svg width="14" height="4" viewBox="0 0 14 4" aria-hidden="true"><circle fill="currentColor" cx="2" cy="2" r="1.75"/><circle fill="currentColor" cx="7" cy="2" r="1.75"/><circle fill="currentColor" cx="12" cy="2" r="1.75"/></svg>
+        </button>
       </span>
     }
     {{ c.text }}
     @if (c.sub) { <span [class]="'sub ' + c.sub.cls">{{ c.sub.text }}</span> }
   </td>
+</ng-template>
+
+<ng-template #tvIcon>
+  <svg width="18" height="10" viewBox="0 0 23 12" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M8.93 11.77H4.68V4.36H0V0h8.93v11.77Zm6.37-9.15c0 1.44-1.14 2.61-2.55 2.61s-2.55-1.17-2.55-2.61S11.34 0 12.75 0s2.55 1.17 2.55 2.62Zm-2.55 9.15L17.64 0h5.1l-4.89 11.77h-5.1Z"/></svg>
+</ng-template>
+
+<!-- "…" menu: the same entries as TradeSmart's chain. Each one hands the contract to the page (contractAction). -->
+<ng-template #moreMenu let-t="t">
+  <div class="more-menu" cdkMenu>
+    @for (m of menuItems; track m.action) {
+      <button type="button" class="more-item" cdkMenuItem (cdkMenuItemTriggered)="emitAction(t, m.action)">
+        <span class="mi-ic" aria-hidden="true">
+          @switch (m.icon) {
+            @case ('watchlist') {
+              <svg [attr.viewBox]="wl.viewBox" fill="none">
+                @for (d of wl.barrels; track $index) {
+                  <path [attr.d]="d" fill="currentColor" stroke="currentColor" [attr.stroke-width]="wl.strokeWidth" />
+                }
+                <path [attr.d]="wl.bridge" stroke="currentColor" [attr.stroke-width]="wl.strokeWidth" />
+              </svg>
+            }
+            @case ('basket') { <svg [attr.viewBox]="bk.viewBox"><path [attr.d]="bk.path" fill="currentColor" /></svg> }
+            @case ('alarm') { <svg viewBox="0 0 16 16"><circle cx="8" cy="9" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 6.2V9l1.8 1.3M2 3.2 3.8 1.6M14 3.2l-1.8-1.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg> }
+            @case ('tv') { <ng-container *ngTemplateOutlet="tvIcon" /> }
+            @case ('depth') { <svg viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> }
+            @case ('clock') { <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.5V8l2.4 1.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg> }
+            @case ('bell') { <svg viewBox="0 0 16 16"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.3 1.5H2.7L4 11Zm2.5 2.8a1.6 1.6 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/></svg> }
+          }
+        </span>
+        {{ m.label }}
+      </button>
+    }
+  </div>
 </ng-template>

@@ -68,6 +68,11 @@ export interface MockMarketOptions {
   now?: () => number;
   /** Strikes per GetOptionChain response (default 35, max 101). */
   strikesPerChain?: number;
+  /**
+   * Build each underlying's expiry calendar from the clock (weeklies, monthlies, quarterlies, half-yearlies, as the
+   * exchanges list them; holidays ignored) instead of the fixed sample dates the tests rely on. Default false.
+   */
+  rollingExpiries?: boolean;
 }
 
 interface Contract { u: UnderlyingDef; ui: number; ei: number; si: number; strike: number; type: 'CE' | 'PE'; lot: number }
@@ -113,12 +118,53 @@ export function mockSmile(K: number, F: number, days: number): number {
   return 0.118 + 0.002 * Math.sqrt(days) - 0.18 * m + 3.2 * m * m;
 }
 
+const IST_MS = 5.5 * 3600_000;
+const isoOf = (y: number, m: number, d: number): string => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+/** Last `weekday` (0 = Sun) of month `m` (0-based, may overflow into later years). */
+function lastWeekday(y: number, m: number, weekday: number): string {
+  const last = new Date(Date.UTC(y, m + 1, 0));
+  return isoOf(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate() - ((last.getUTCDay() - weekday + 7) % 7));
+}
+
+/**
+ * Demo calendar from `nowMs` (IST date): NSE expires on Tuesdays, BSE on Thursdays. Indices: 4 weeklies,
+ * 3 monthlies, the next 3 quarterlies (Mar/Jun/Sep/Dec) and, for NIFTY, half-yearlies (Jun/Dec) for ~4 years.
+ * Stocks: 3 monthlies. Expired dates are dropped downstream (InstrumentsService).
+ */
+export function rollingExpiries(u: UnderlyingDef, nowMs: number): ExpiryDef[] {
+  const today = new Date(nowMs + IST_MS);
+  const y = today.getUTCFullYear(), m = today.getUTCMonth(), d = today.getUTCDate();
+  const todayIso = isoOf(y, m, d);
+  const weekday = u.exch === 'BSE' ? 4 : 2;
+  const isIndex = u.expiries !== MONTHLY;
+  const set = new Set<string>();
+  const months: string[] = [];
+  for (let k = 0; months.length < 3; k++) { const e = lastWeekday(y, m + k, weekday); if (e >= todayIso) months.push(e); }
+  months.forEach((e) => set.add(e));
+  if (isIndex) {
+    const ahead = (d0: number) => isoOf(y, m, d + ((weekday - today.getUTCDay() + 7) % 7) + d0);
+    for (let w = 0; w < 4; w++) set.add(ahead(7 * w));
+    const lastMonthly = months[2]!;
+    let q = 0;
+    for (let k = 0; q < 3 && k < 24; k++) {
+      const mm = (m + k) % 12;
+      const e = lastWeekday(y, m + k, weekday);
+      if (mm % 3 === 2 && e > lastMonthly) { set.add(e); q++; }
+    }
+    if (u.sym === 'NIFTY') for (let k = 0; k < 54; k++) { const mm = (m + k) % 12; if (mm === 5 || mm === 11) set.add(lastWeekday(y, m + k, weekday)); }
+  }
+  // SENSEX lot size is 25 from the Jan 2027 expiries (spec D21).
+  return [...set].filter((e) => e >= todayIso).sort().map((iso) => (u.sym === 'SENSEX' && iso >= '2027-01-01' ? { iso, lot: 25 } : { iso }));
+}
+
 export class MockMarket {
   /** Seeded PRNG for the feed's tick stream (pass it to MockFeedTransport as `random`). */
   readonly random: () => number;
   private readonly seedValue: number;
   private readonly now: () => number;
   private readonly strikesPerChain: number;
+  /** Expiry calendar per underlying (index as UNDERLYINGS). */
+  private readonly expiryLists: ExpiryDef[][];
   private readonly spots = new Map<string, SpotState>();
   private readonly legs = new Map<string, LegState>();
 
@@ -127,15 +173,17 @@ export class MockMarket {
     this.random = prng(this.seedValue);
     this.now = opts.now ?? Date.now;
     this.strikesPerChain = Math.max(1, Math.min(2 * GRID + 1, opts.strikesPerChain ?? 35));
+    this.expiryLists = UNDERLYINGS.map((u) => (opts.rollingExpiries ? rollingExpiries(u, this.now()) : u.expiries));
   }
 
   /** GetLinkedScrips: every option expiry with an anchor trading symbol. */
   linkedScrips(exch: string, token: string): LinkedScripsResponse {
-    const u = UNDERLYINGS.find((x) => x.exch === exch && x.token === token);
+    const ui = UNDERLYINGS.findIndex((x) => x.exch === exch && x.token === token);
+    const u = UNDERLYINGS[ui];
     if (!u) return { stat: 'Ok', opt_exp: [] };
     return {
       stat: 'Ok',
-      opt_exp: u.expiries.map((e) => ({ exd: exdOf(e.iso), exch: u.foExch, tsym: `${u.sym}${tsymDate(e.iso)}C${atm0(u)}` })),
+      opt_exp: this.expiryLists[ui]!.map((e) => ({ exd: exdOf(e.iso), exch: u.foExch, tsym: `${u.sym}${tsymDate(e.iso)}C${atm0(u)}` })),
     };
   }
 
@@ -146,7 +194,7 @@ export class MockMarket {
     const ui = UNDERLYINGS.findIndex((x) => x.sym === m[1] && x.foExch === exch);
     const u = UNDERLYINGS[ui];
     if (!u) return [];
-    const ei = u.expiries.findIndex((e) => tsymDate(e.iso) === m[2]);
+    const ei = this.expiryLists[ui]!.findIndex((e) => tsymDate(e.iso) === m[2]);
     if (ei < 0) return [];
     const n = this.strikesPerChain;
     const centre = Math.round((strprc - atm0(u)) / u.step) + GRID;
@@ -284,7 +332,7 @@ export class MockMarket {
 
   private contract(ui: number, ei: number, si: number, type: 'CE' | 'PE'): Contract | null {
     const u = UNDERLYINGS[ui];
-    const e = u?.expiries[ei];
+    const e = this.expiryLists[ui]?.[ei];
     if (!u || !e || si < 0 || si > 2 * GRID) return null;
     return { u, ui, ei, si, strike: atm0(u) + (si - GRID) * u.step, type, lot: e.lot ?? u.lot };
   }
@@ -292,7 +340,7 @@ export class MockMarket {
   /** Black-76 price on the smile at underlying `S`, `extraDays` before now (1 = yesterday's close). */
   private price(c: Contract, S: number, extraDays: number): number {
     const r = DEFAULT_CONFIG.riskFreeRate;
-    const expiry = expiryInstantMs(c.u.expiries[c.ei]!.iso);
+    const expiry = expiryInstantMs(this.expiryLists[c.ui]![c.ei]!.iso);
     const T = Math.max(1 / 365 / 24, (expiry - this.now()) / YEAR_MS) + extraDays / 365;
     const F = S * Math.exp(r * T);
     return roundTick(black76(c.type, F, c.strike, T, r, mockSmile(c.strike, F, T * 365)).price);

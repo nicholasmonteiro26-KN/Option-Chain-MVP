@@ -1,14 +1,17 @@
 :host {
-  display: block;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   color: var(--ts-fg);
   background: var(--ts-bg);
   font-family: var(--ts-font);
 }
 
+// Fills the space the page gives the chain; the strikes scroll here and nowhere else.
 .tbl-wrap {
+  flex: 1 1 0;
+  min-height: 0;
   overflow: auto;
-  max-height: 560px;
   position: relative;
 }
 
@@ -32,28 +35,66 @@ th {
   padding: 8px 10px;
   border-bottom: 1px solid var(--ts-line);
   white-space: nowrap;
-  text-align: right;
-}
-th.side-h {
+  // Centred, as on TradeSmart: the call and put sides then mirror each other (equal space at both outer edges and
+  // either side of the strike).
   text-align: center;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
-thead tr:nth-child(2) th { top: var(--head1-h, 31px); }
-// Strike mode has a single header row.
-thead tr:only-child th { top: 0; }
+// CE / PE chips in the header, over each side's checkbox column (Dhan's layout, our colours: calls red like their
+// OI lines, puts green). The header cell keeps the same inner padding as the cells below, so labels stay centred.
+th.in-ce { padding-right: 36px; }
+th.in-pe { padding-left: 36px; }
+th .side {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 24px;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  &.ce { right: 6px; color: var(--ts-red); background: var(--ts-red-soft); }
+  &.pe { left: 6px; color: var(--ts-green); background: var(--ts-green-soft); }
+}
+// Unit after a header label: "OI (In Lacs)", the unit small and grey (TradeSmart).
+th .unit {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--ts-muted);
+}
+
+// Strike header: flips the strike order. The arrow for the current order is blue, the other grey (TradeSmart).
+th .sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  .ar { color: var(--ts-muted); }
+  .ar:first-of-type { margin-left: 4px; }
+  .ar.on { color: var(--ts-blue); }
+  &:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; border-radius: 2px; }
+}
+
 
 td {
   padding: 6px 10px;
   border-bottom: 1px solid var(--ts-line);
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
 }
 // Only cells with an absolutely positioned child are positioned: a positioned element gets its own paint layer, and
 // ~3000 of them (every cell of a 200-contract chain) made each repaint after a tick noticeably slower.
 td.acts-host, tr.skel td { position: relative; }
 td.k, th.k {
+  width: 1%; // as narrow as the strike chip: the spare width goes to the data columns
   text-align: center;
   font-weight: 600;
   color: var(--ts-fg);
@@ -75,8 +116,35 @@ td.k.atm .chip {
 }
 td.itm { background: var(--ts-itm); }
 td.ltp { font-weight: 500; }
-td.chk { width: 28px; text-align: center; padding: 0 4px; }
-td.chk input { margin: 0; cursor: pointer; }
+
+// Basket checkboxes either side of the strike chip, drawn like TradeSmart's (16px, 4px radius, blue when ticked).
+// The innermost cell of each side holds the checkbox at its strike-side edge (TradeSmart: "195.75 ☐ | 24600 | ☐ 125.00").
+td.in-ce { padding-right: 36px; }
+td.in-pe { padding-left: 36px; }
+input.cb {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--ts-input-border);
+  border-radius: 4px;
+  background: var(--ts-input-bg) no-repeat center / 10px 10px;
+  cursor: pointer;
+  &.ce { right: 10px; }
+  &.pe { left: 10px; }
+  &:checked {
+    border-color: var(--ts-blue);
+    background-color: var(--ts-blue);
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e");
+  }
+  &:focus-visible {
+    outline: 2px solid var(--ts-focus);
+    outline-offset: 2px;
+  }
+}
 
 .sub { display: block; font-size: 10.5px; }
 .pos { color: var(--ts-green); }
@@ -91,62 +159,131 @@ td.stale { opacity: 0.55; }
 .s-sc { color: var(--ts-sense-sc); }
 .s-lu { color: var(--ts-sense-lu); }
 
-// OI bars
+// OI lines (TradeSmart): a 2px line along the bottom of the row, running out from the middle - calls red to the
+// left, puts green to the right - strongest at the far end and fading towards the strike. The row is the
+// containing block (the strike cell is not positioned), so the widths are a % of the row.
+tr.oi-row { position: relative; }
+.oil {
+  position: absolute;
+  bottom: 0;
+  height: 2px;
+  pointer-events: none;
+  &.ce {
+    right: 50%;
+    border-radius: 2px 0 0 2px;
+    background: linear-gradient(90deg,
+      color-mix(in srgb, var(--ts-red) 95%, transparent),
+      color-mix(in srgb, var(--ts-red) 60%, transparent) 55%,
+      color-mix(in srgb, var(--ts-red) 30%, transparent) 85%,
+      color-mix(in srgb, var(--ts-red) 10%, transparent));
+  }
+  &.pe {
+    left: 50%;
+    border-radius: 0 2px 2px 0;
+    background: linear-gradient(90deg,
+      color-mix(in srgb, var(--ts-green) 10%, transparent),
+      color-mix(in srgb, var(--ts-green) 30%, transparent) 15%,
+      color-mix(in srgb, var(--ts-green) 60%, transparent) 45%,
+      color-mix(in srgb, var(--ts-green) 95%, transparent));
+  }
+}
+
+// Cum OI (strike mode) keeps an in-cell bar.
 td.bar { background-repeat: no-repeat; }
-td.bar.ce {
-  background-image: linear-gradient(to left, var(--ts-bar-ce), var(--ts-bar-ce));
-  background-position: right center;
-}
-td.bar.pe {
-  background-image: linear-gradient(to right, var(--ts-bar-pe), var(--ts-bar-pe));
-  background-position: left center;
-}
 td.bar.cum {
   background-image: linear-gradient(to right, var(--ts-bar-cum), var(--ts-bar-cum));
   background-position: left center;
 }
 
-// Hover Buy / Sell
+// Hover Buy / Sell (TradeSmart): on the innermost cell of each side, against the strike.
 .acts {
   position: absolute;
+  z-index: 1;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   opacity: 0;
   pointer-events: none;
-  gap: 3px;
-  &.ce { left: 6px; }
-  &.pe { right: 6px; }
+  gap: 4px;
+  &.ce { right: 34px; } // clear of the checkbox
+  &.pe { left: 34px; }
   button {
-    font: 600 10.5px var(--ts-font);
+    width: 35px;
+    height: 30px;
+    font: 400 16px var(--ts-font);
     border: 0;
     border-radius: 4px;
-    padding: 2px 7px;
+    padding: 1px 6px;
     cursor: pointer;
     color: var(--ts-on-accent);
   }
   .b { background: var(--ts-blue); }
   .s { background: var(--ts-red); }
+  // Chart, Advanced Chart and "…": white squares with a hairline border (TradeSmart's chartbtn).
+  .ic {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 35px;
+    height: 35px;
+    padding: 0;
+    border: 1px solid var(--ts-line);
+    background: var(--ts-bg);
+    color: var(--ts-strike-fg);
+    &:hover { background: var(--ts-bg2); }
+  }
+  button:focus-visible {
+    outline: 2px solid var(--ts-focus);
+    outline-offset: 1px;
+  }
 }
 tr:hover .acts,
-tr:focus-within .acts { opacity: 1; pointer-events: auto; }
+tr:focus-within .acts,
+tr:has(.more[aria-expanded='true']) .acts { opacity: 1; pointer-events: auto; }
 
-// Sigma row
-tfoot td {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  background: var(--ts-bg2);
-  font-weight: 600;
-  border-top: 1px solid var(--ts-line);
-  border-bottom: 0;
+// "…" menu (rendered in a CDK overlay; the template's encapsulated styles still apply).
+.more-menu {
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  background: var(--ts-bg);
+  border: 1px solid var(--ts-line);
+  border-radius: 6px;
+  box-shadow: 0 0 10px var(--ts-menu-shadow);
+  overflow: hidden;
+  font-family: var(--ts-font);
+}
+.more-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--ts-line);
+  background: transparent;
+  color: var(--ts-strike-fg);
+  font: 400 14px var(--ts-font);
+  text-align: left;
+  cursor: pointer;
+  &:last-child { border-bottom: 0; }
+  &:hover, &:focus { background: var(--ts-bg2); outline: none; }
+  &:focus-visible { box-shadow: inset 2px 0 0 var(--ts-focus); }
+}
+.mi-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  svg { width: 16px; height: 16px; }
+  svg[viewBox='0 0 23 12'] { width: 16px; height: 9px; }
 }
 
-// Spot line: sticks just inside the header / footer when scrolled out of view.
+// Spot line: sticks just inside the header / bottom edge when scrolled out of view.
 tr.spot td {
   position: sticky;
   top: var(--head-h, 74px);
-  bottom: var(--foot-h, 12px);
+  bottom: 12px;
   z-index: 3;
   height: 0;
   padding: 0;
@@ -171,7 +308,7 @@ tr.spot .pill {
 
 // Skeleton rows
 tr.skel td { color: transparent; height: 31px; }
-tr.skel td:not(.chk)::after {
+tr.skel td::after {
   content: '';
   position: absolute;
   inset: 9px 10px;

@@ -1,12 +1,15 @@
 import {
-  afterRenderEffect, ChangeDetectionStrategy, Component, computed, ElementRef, inject, input, output, viewChild,
+  afterRenderEffect, ChangeDetectionStrategy, Component, computed, ElementRef, inject, input, output, signal,
+  viewChild,
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
+import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import type { IvStatus } from '@option-analytics/index';
 import type { ColumnDef } from '../../columns/column-registry';
 import { COLUMNS, exactTitle, pricePrecision } from '../../columns/column-registry';
 import { splitFeedKey } from '../../data-access/models';
 import type { LegVM, RowVM, ChainViewModel } from '../../view/chain-view-model';
+import { BASKET_ICON, WATCHLIST_ICON } from '../ts-icons';
 import { FlashDirective } from './flash.directive';
 
 /**
@@ -16,6 +19,27 @@ import { FlashDirective } from './flash.directive';
 export interface TradeEvent {
   token: string; exch: string; rawToken: string; tsym: string; side: 'BUY' | 'SELL'; ltp: number; lotSize: number;
 }
+
+/** The per-contract actions besides Buy / Sell: the chart buttons and the "…" menu, as on TradeSmart's chain. */
+export type ContractAction =
+  | 'chart' | 'advancedChart' | 'watchlist' | 'basket' | 'ato' | 'marketDepth' | 'gtt' | 'priceAlert';
+
+/** A hover-button or "…" menu action on one contract. Same contract fields as TradeEvent, without the side. */
+export interface ContractActionEvent {
+  action: ContractAction; token: string; exch: string; rawToken: string; tsym: string; ltp: number; lotSize: number;
+}
+
+interface MenuItem { action: ContractAction; label: string; icon: string }
+/** TradeSmart's "…" menu, in its order. */
+export const MORE_MENU: readonly MenuItem[] = [
+  { action: 'watchlist', label: 'Add to Watchlist', icon: 'watchlist' },
+  { action: 'basket', label: 'Add to Basket', icon: 'basket' },
+  { action: 'ato', label: 'Create ATO', icon: 'alarm' },
+  { action: 'advancedChart', label: 'Advanced Chart', icon: 'tv' },
+  { action: 'marketDepth', label: 'Market Depth', icon: 'depth' },
+  { action: 'gtt', label: 'Create GTT', icon: 'clock' },
+  { action: 'priceAlert', label: 'Price Alert', icon: 'bell' },
+];
 
 const DASH = '–';
 const SKELETON_ROWS = 10;
@@ -46,26 +70,33 @@ interface CellVM {
   /** Numeric value watched by ocFlash, for flash columns only. */
   flash: number | null;
   trade: TradeCtx | null;
+  /** The basket checkbox, on the innermost cell of each side only. */
+  check: { token: string; label: string } | null;
 }
 interface RowView {
   strike: number;
-  ceToken: string | null;
-  peToken: string | null;
   ce: CellVM[];
   pe: CellVM[];
   /** Strike-mode cells (everything after the strike). */
   cells: CellVM[];
+  /** Spot line after this row (ascending order) or before it (descending): the lower strike around spot. */
   spotAfter: boolean;
+  spotBefore: boolean;
   /** The analytics ATM strike: its strike chip is highlighted. */
   atm: boolean;
+  /**
+   * OI line widths, as a % of the row: each side's line runs from the middle of the row outwards, so a full line
+   * (the side's largest OI) is 50%.
+   */
+  ceOi: number;
+  peOi: number;
 }
-interface SumCell { id: string; text: string }
 
 const signClass = (v: unknown): string => (typeof v === 'number' ? (v > 0 ? 'pos' : v < 0 ? 'neg' : '') : '');
 
 @Component({
   selector: 'oc-chain-table',
-  imports: [FlashDirective, NgTemplateOutlet],
+  imports: [FlashDirective, NgTemplateOutlet, CdkMenu, CdkMenuItem, CdkMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './chain-table.component.html',
   styleUrl: './chain-table.component.scss',
@@ -79,10 +110,17 @@ export class ChainTableComponent {
 
   readonly trade = output<TradeEvent>();
   readonly toggleCheck = output<string>();
+  readonly contractAction = output<ContractActionEvent>();
+
+  protected readonly menuItems = MORE_MENU;
+  /** TradeSmart's watchlist (binoculars) and basket icons, for those two menu entries. */
+  protected readonly wl = WATCHLIST_ICON;
+  protected readonly bk = BASKET_ICON;
+  /** Strike order, flipped by the arrows on the Strike header (TradeSmart). Ascending by default. */
+  protected readonly descending = signal(false);
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly head = viewChild<ElementRef<HTMLElement>>('head');
-  private readonly foot = viewChild<ElementRef<HTMLElement>>('foot');
 
   protected readonly mirrored = computed(() => this.vm().mode === 'mirrored');
   protected readonly ceCols = computed(() => this.vm().columns);
@@ -92,7 +130,7 @@ export class ChainTableComponent {
   protected readonly spotLabel = computed(() =>
     this.spot().toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
-  /** What the header / footer heights depend on. A string, so tick-only view-model changes leave it equal. */
+  /** What the header height depends on. A string, so tick-only view-model changes leave it equal. */
   private readonly layoutKey = computed(() => {
     const vm = this.vm();
     return `${vm.mode}|${vm.columns.map((c) => c.id).join(',')}|${this.loading()}`;
@@ -105,7 +143,10 @@ export class ChainTableComponent {
     const cols = vm.columns;
     const mirrored = vm.mode === 'mirrored';
     const peCols = [...cols].reverse();
-    return vm.rows.map((row) => {
+    const half = (oi: number | undefined, max: number): number =>
+      oi && max > 0 ? Math.round(Math.min(oi / max, 1) * 5000) / 100 : 0;
+    const desc = this.descending();
+    const view = vm.rows.map((row) => {
       const ceStale = !!row.ce && stale.has(row.ce.ref.token);
       const peStale = !!row.pe && stale.has(row.pe.ref.token);
       const build = (list: ColumnDef[], side: 'ce' | 'pe', outer: number): CellVM[] =>
@@ -116,47 +157,53 @@ export class ChainTableComponent {
         }));
       return {
         strike: row.strike,
-        ceToken: row.ce?.ref.token ?? null,
-        peToken: row.pe?.ref.token ?? null,
-        ce: mirrored ? build(cols, 'ce', 0) : [],
-        pe: mirrored ? build(peCols, 'pe', peCols.length - 1) : [],
+        // B/S sit on the innermost cell of each side, next to the strike.
+        ce: mirrored ? build(cols, 'ce', cols.length - 1) : [],
+        pe: mirrored ? build(peCols, 'pe', 0) : [],
         cells: mirrored ? [] : cols.map((c) => this.cell(c, row, vm, undefined, { itm: false, stale: false, acts: false })),
-        spotAfter: vm.spotSlot !== null && row.strike === vm.spotSlot,
+        spotAfter: !desc && vm.spotSlot !== null && row.strike === vm.spotSlot,
+        spotBefore: desc && vm.spotSlot !== null && row.strike === vm.spotSlot,
         atm: vm.atmStrike != null && row.strike === vm.atmStrike,
+        ceOi: mirrored ? half(row.ce?.quote?.oi, vm.maxOi.ce) : 0,
+        peOi: mirrored ? half(row.pe?.quote?.oi, vm.maxOi.pe) : 0,
       };
     });
-  });
-
-  protected readonly sums = computed(() => {
-    const vm = this.vm();
-    const of = (c: ColumnDef, key: 'ce' | 'pe' | 'total'): SumCell => ({
-      id: c.id, text: c.sum && vm.sums[c.id] ? c.format(vm.sums[c.id]![key]) : '',
-    });
-    return {
-      ce: vm.columns.map((c) => of(c, 'ce')),
-      pe: [...vm.columns].reverse().map((c) => of(c, 'pe')),
-      total: vm.columns.map((c) => of(c, 'total')),
-    };
+    return desc ? view.reverse() : view;
   });
 
   constructor() {
-    // The spot line sticks 12px inside the header / footer so it never hides under them. Measured only when the
-    // header / footer structure changes (columns, mode, loading), not on every tick: reading offsetHeight after
+    // The spot line sticks 12px inside the header so it never hides under it. Measured only when the
+    // header structure changes (columns, mode, loading), not on every tick: reading offsetHeight after
     // a tick's DOM writes forces a synchronous layout of the whole table.
     afterRenderEffect(() => {
       this.layoutKey();
       const h = this.head()?.nativeElement.offsetHeight ?? 0;
-      const h1 = this.head()?.nativeElement.querySelector('tr')?.offsetHeight ?? 0;
-      const f = this.foot()?.nativeElement.offsetHeight ?? 0;
       const style = this.host.nativeElement.style;
       style.setProperty('--head-h', `${h + 12}px`);
-      style.setProperty('--head1-h', `${h1}px`);
-      style.setProperty('--foot-h', `${f + 12}px`);
     });
+  }
+
+  protected toggleSort(): void {
+    this.descending.update((d) => !d);
+  }
+
+  /**
+   * A controlled box: it shows `checked`, not the click. The click is undone at once; the parent's new `checked`
+   * (if it accepts the change) re-ticks or unticks it on the next render. So a refused tick (strategy full) stays off.
+   */
+  protected onCheck(e: Event, token: string): void {
+    (e.target as HTMLInputElement).checked = this.checked().has(token);
+    this.toggleCheck.emit(token);
   }
 
   protected emitTrade(t: TradeCtx, side: 'BUY' | 'SELL'): void {
     this.trade.emit({ token: t.token, ...splitFeedKey(t.token), tsym: t.tsym, side, ltp: t.ltp, lotSize: t.lotSize });
+  }
+
+  protected emitAction(t: TradeCtx, action: ContractAction): void {
+    this.contractAction.emit({
+      action, token: t.token, ...splitFeedKey(t.token), tsym: t.tsym, ltp: t.ltp, lotSize: t.lotSize,
+    });
   }
 
   private cell(
@@ -169,18 +216,19 @@ export class ChainTableComponent {
     const cls: string[] = [];
     let bar: string | null = null;
     if (o.itm) cls.push('itm');
-    if (col.bar) {
-      const kind = col.bar === 'cumOi' ? 'cum' : side;
-      const max = kind === 'cum' ? vm.maxOi.cum : kind === 'ce' ? vm.maxOi.ce : vm.maxOi.pe;
+    // Per-side OI is drawn as a line under the whole row (see the template); only Cum OI keeps an in-cell bar.
+    if (col.bar === 'cumOi') {
+      const max = vm.maxOi.cum;
       const pct = typeof v === 'number' && max > 0 ? (v / max) * 100 : 0;
-      cls.push('bar', kind ?? 'ce');
+      cls.push('bar', 'cum');
       bar = `${pct.toFixed(1)}% 70%`;
     }
     if (SIGNED.has(col.id)) cls.push(signClass(v));
     if (col.id === 'oiSense' && typeof v === 'string') cls.push('sense', SENSE_CLASS[v] ?? '');
     if (col.flash) cls.push('ltp');
     if (o.stale) cls.push('stale');
-    if (o.acts) cls.push('acts-host'); // positioning context for the hover Buy / Sell buttons
+    // Positioning context for the checkbox and the hover buttons; in-ce / in-pe leave room for the checkbox.
+    if (o.acts) cls.push('acts-host', side === 'ce' ? 'in-ce' : 'in-pe');
     let title: string | null = col.title ?? null;
     if (col.exact && typeof v === 'number') title = exactTitle(v);
     if (col.id === 'iv' && leg?.a) {
@@ -207,6 +255,9 @@ export class ChainTableComponent {
       bar, sub, title,
       flash: col.flash && typeof v === 'number' ? v : null,
       trade,
+      check: o.acts && leg
+        ? { token: leg.ref.token, label: `Select ${row.strike} ${side === 'ce' ? 'CE' : 'PE'}` }
+        : null,
     };
   }
 }

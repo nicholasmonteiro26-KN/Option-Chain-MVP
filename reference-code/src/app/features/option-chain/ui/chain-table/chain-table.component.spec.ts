@@ -5,7 +5,7 @@ import { sampleChain, SAMPLE_LOT, SAMPLE_SPOT, sampleToken } from '@option-analy
 import { ChainMeta, ContractRef, QUICK_UNDERLYINGS } from '../../data-access/models';
 import { buildViewModel, ChainViewModel } from '../../view/chain-view-model';
 import { GEX_TITLE } from '../../columns/column-registry';
-import { ChainTableComponent, TradeEvent } from './chain-table.component';
+import { ChainTableComponent, ContractActionEvent, MORE_MENU, TradeEvent } from './chain-table.component';
 
 type Patch = { strike: number; type: OptType; patch: Partial<LegQuote> };
 
@@ -66,10 +66,18 @@ const tds = (r: HTMLTableRowElement): HTMLTableCellElement[] => Array.from(r.que
 describe('ChainTableComponent mirrored', () => {
   it('renders Volume OI Bid Ask LTP | Strike | LTP Ask Bid OI Volume for the Default preset', () => {
     const f = setup(makeVm());
-    const heads = Array.from(el(f).querySelectorAll('thead tr:nth-child(2) th')).map(text).filter(Boolean);
-    expect(heads).toEqual(['Volume', 'OI', 'Bid', 'Ask', 'LTP', 'Strike', 'LTP', 'Ask', 'Bid', 'OI', 'Volume']);
-    const top = Array.from(el(f).querySelectorAll('thead tr:first-child th')).map(text);
-    expect(top).toEqual(['Calls', '', 'Puts']);
+    // One header row (no Calls / Puts row): CE and PE chips sit beside the strike, by the innermost LTP headers.
+    expect(el(f).querySelectorAll('thead tr')).toHaveLength(1);
+    const heads = Array.from(el(f).querySelectorAll('thead th')).map((h) => text(h).replace(/\s+/g, ''));
+    // OI and volume headers carry their unit, as on TradeSmart.
+    expect(heads).toEqual([
+      'Volume(InLacs)', 'OI(InLacs)', 'Bid', 'Ask', 'LTPCE', 'Strike', 'PELTP', 'Ask', 'Bid', 'OI(InLacs)', 'Volume(InLacs)',
+    ]);
+    expect(el(f).querySelector('thead th .unit')!.textContent!.trim()).toBe('(In Lacs)');
+    expect(el(f).querySelector('[data-testid="side-ce"]')!.closest('th')!.classList).toContain('in-ce');
+    expect(el(f).querySelector('[data-testid="side-pe"]')!.closest('th')!.classList).toContain('in-pe');
+    expect(el(f).querySelector('.side.ce')!.textContent).toBe('CE');
+    expect(el(f).querySelector('.side.pe')!.textContent).toBe('PE');
   });
 
   it('renders PE cells in reverse column order', () => {
@@ -77,14 +85,14 @@ describe('ChainTableComponent mirrored', () => {
     const f = setup(vm);
     const row = strikeRow(f, 25000);
     const cells = tds(row);
-    // chk, 5 CE, strike, 5 PE, chk
-    expect(cells.length).toBe(13);
+    // 5 CE, strike (with the two basket checkboxes), 5 PE
+    expect(cells.length).toBe(11);
     const q = (t: OptType): LegQuote => sampleChain().strikes.find((s) => s.strike === 25000)![t === 'CE' ? 'ce' : 'pe']!;
     const lakh = (n: number): string => (n / 1e5).toFixed(2);
-    expect(val(cells[1]!)).toBe(lakh(q('CE').volume));
-    expect(val(cells[2]!)).toBe(lakh(q('CE').oi));
-    expect(val(cells[10]!)).toBe(lakh(q('PE').oi));
-    expect(val(cells[11]!)).toBe(lakh(q('PE').volume));
+    expect(val(cells[0]!)).toBe(lakh(q('CE').volume));
+    expect(val(cells[1]!)).toBe(lakh(q('CE').oi));
+    expect(val(cells[9]!)).toBe(lakh(q('PE').oi));
+    expect(val(cells[10]!)).toBe(lakh(q('PE').volume));
   });
 
   it('inserts the spot line directly after the slot row with the formatted spot', () => {
@@ -121,29 +129,30 @@ describe('ChainTableComponent mirrored', () => {
     expect(el(off).querySelector('tr.spot')).toBeNull();
   });
 
-  it('draws the CE OI bar with a width of oi / maxOi.ce', () => {
+  it('draws the OI lines under the row: each side oi / maxOi of half the row, and no in-cell OI bars', () => {
     const vm = makeVm();
     const f = setup(vm);
     const row = vm.rows.find((r) => r.strike === 25100)!;
-    const cell = tds(strikeRow(f, 25100))[2]!;
-    expect(cell.classList.contains('bar')).toBe(true);
-    expect(cell.classList.contains('ce')).toBe(true);
-    const pct = ((row.ce!.quote!.oi / vm.maxOi.ce) * 100).toFixed(1);
-    expect(cell.getAttribute('style')).toContain(`background-size: ${pct}% 70%`);
-    const pe = tds(strikeRow(f, 25100))[10]!;
-    expect(pe.classList.contains('pe')).toBe(true);
-    expect(pe.getAttribute('style')).toContain(`${((row.pe!.quote!.oi / vm.maxOi.pe) * 100).toFixed(1)}% 70%`);
+    const tr = strikeRow(f, 25100);
+    expect(tr.classList.contains('oi-row')).toBe(true);
+    const half = (oi: number, max: number): string => `${Math.round((oi / max) * 5000) / 100}%`;
+    expect(tr.querySelector<HTMLElement>('td.k .oil.ce')!.style.width).toBe(half(row.ce!.quote!.oi, vm.maxOi.ce));
+    expect(tr.querySelector<HTMLElement>('td.k .oil.pe')!.style.width).toBe(half(row.pe!.quote!.oi, vm.maxOi.pe));
+    // The strike with the largest call OI reaches the edge of the row (50%).
+    const top = vm.rows.reduce((a, r) => ((r.ce?.quote?.oi ?? 0) > (a.ce?.quote?.oi ?? 0) ? r : a));
+    expect(strikeRow(f, top.strike).querySelector<HTMLElement>('.oil.ce')!.style.width).toBe('50%');
+    expect(el(f).querySelector('tbody td.bar')).toBeNull();
   });
 
   it('shades ITM calls below spot and ITM puts above spot', () => {
     const f = setup(makeVm());
     const below = tds(strikeRow(f, 24950));
-    expect(below[1]!.classList.contains('itm')).toBe(true);
-    expect(below[11]!.classList.contains('itm')).toBe(false);
+    expect(below[0]!.classList.contains('itm')).toBe(true);
+    expect(below[10]!.classList.contains('itm')).toBe(false);
     const above = tds(strikeRow(f, 25000));
-    expect(above[1]!.classList.contains('itm')).toBe(false);
-    expect(above[11]!.classList.contains('itm')).toBe(true);
-    expect(below[6]!.classList.contains('itm')).toBe(false);
+    expect(above[0]!.classList.contains('itm')).toBe(false);
+    expect(above[10]!.classList.contains('itm')).toBe(true);
+    expect(below[5]!.classList.contains('itm')).toBe(false);
   });
 
   it('emits trade when the CE B is clicked', () => {
@@ -151,36 +160,82 @@ describe('ChainTableComponent mirrored', () => {
     const out: unknown[] = [];
     f.componentInstance.trade.subscribe((e) => out.push(e));
     const row = tds(strikeRow(f, 25000));
-    row[1]!.querySelector<HTMLButtonElement>('.acts .b')!.click();
+    row[4]!.querySelector<HTMLButtonElement>('.acts .b')!.click();
     expect(out.length).toBe(1);
     const ev = out[0] as { side: string; token: string; tsym: string; lotSize: number; ltp: number };
     expect(ev).toMatchObject({ side: 'BUY', token: 'CE25000', tsym: 'NIFTY03NOV26C25000', lotSize: 65 });
     expect(ev.ltp).toBeGreaterThan(0);
-    row[11]!.querySelector<HTMLButtonElement>('.acts .s')!.click();
+    row[6]!.querySelector<HTMLButtonElement>('.acts .s')!.click();
     expect(out[1]).toMatchObject({ side: 'SELL', token: 'PE25000' });
-    const b = row[1]!.querySelector<HTMLButtonElement>('.acts .b')!;
+    const b = row[4]!.querySelector<HTMLButtonElement>('.acts .b')!;
     b.focus();
     expect(document.activeElement).toBe(b);
     expect(b.tabIndex).toBe(0);
     expect(b.getAttribute('aria-label')).toBe('Buy 25000 CE');
-    expect(row[1]!.querySelector('.acts .s')!.getAttribute('aria-label')).toBe('Sell 25000 CE');
-    expect(row[11]!.querySelector('.acts .s')!.getAttribute('aria-label')).toBe('Sell 25000 PE');
-    // B/S only on the outermost cell of each side
+    expect(row[4]!.querySelector('.acts .s')!.getAttribute('aria-label')).toBe('Sell 25000 CE');
+    expect(row[6]!.querySelector('.acts .s')!.getAttribute('aria-label')).toBe('Sell 25000 PE');
+    // B/S only on the innermost cell of each side
     expect(el(f).querySelectorAll('tbody tr:not(.spot):first-child .acts').length).toBe(2);
   });
 
-  it('marks only the outermost cell of each side as the B/S positioning context (acts-host)', () => {
+  it('shows B, S, Chart, Advanced Chart and More on hover, labelled per contract', () => {
+    const f = setup(makeVm());
+    const row = tds(strikeRow(f, 25000));
+    const labels = (td: HTMLTableCellElement): (string | null)[] =>
+      Array.from(td.querySelectorAll('.acts button')).map((b) => b.getAttribute('aria-label'));
+    expect(labels(row[4]!)).toEqual([
+      'Buy 25000 CE', 'Sell 25000 CE', 'Chart 25000 CE', 'Advanced chart 25000 CE', 'More actions for 25000 CE',
+    ]);
+    expect(labels(row[6]!)[4]).toBe('More actions for 25000 PE');
+  });
+
+  it('emits contractAction with the contract for Chart and Advanced Chart', () => {
+    const f = setup(makeVm());
+    const out: ContractActionEvent[] = [];
+    f.componentInstance.contractAction.subscribe((e) => out.push(e));
+    const row = tds(strikeRow(f, 25000));
+    row[4]!.querySelector<HTMLButtonElement>('.acts .chart')!.click();
+    row[6]!.querySelector<HTMLButtonElement>('.acts .adv')!.click();
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ action: 'chart', token: 'CE25000', tsym: 'NIFTY03NOV26C25000', lotSize: 65 });
+    expect(out[0]!.ltp).toBeGreaterThan(0);
+    expect(out[1]).toMatchObject({ action: 'advancedChart', token: 'PE25000' });
+  });
+
+  it('opens the … menu with TradeSmart\'s entries, and a picked entry emits that action for the row\'s contract', async () => {
+    const f = setup(makeVm());
+    const out: ContractActionEvent[] = [];
+    f.componentInstance.contractAction.subscribe((e) => out.push(e));
+    const more = tds(strikeRow(f, 25000))[6]!.querySelector<HTMLButtonElement>('.acts .more')!;
+    more.click();
+    f.detectChanges();
+    await f.whenStable();
+    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('.more-menu .more-item'));
+    expect(items.map((i) => text(i))).toEqual(MORE_MENU.map((m) => m.label));
+    expect(items.map((i) => text(i))).toEqual([
+      'Add to Watchlist', 'Add to Basket', 'Create ATO', 'Advanced Chart', 'Market Depth', 'Create GTT', 'Price Alert',
+    ]);
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    items[4]!.click();
+    f.detectChanges();
+    await f.whenStable();
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ action: 'marketDepth', token: 'PE25000', tsym: 'NIFTY03NOV26P25000' });
+    expect(document.querySelector('.more-menu')).toBeNull(); // picking an entry closes the menu
+  });
+
+  it('marks only the innermost cell of each side, next to the strike, as the B/S positioning context (acts-host)', () => {
     const f = setup(makeVm());
     const row = tds(strikeRow(f, 25000));
     const hosts = row.map((td, i) => (td.classList.contains('acts-host') ? i : -1)).filter((i) => i >= 0);
-    expect(hosts).toEqual([1, 11]);
+    expect(hosts).toEqual([4, 6]);
   });
 
   it('hides B/S when the leg has no ltp', () => {
     const f = setup(makeVm('default', [{ strike: 25100, type: 'CE', patch: { ltp: null } }]));
     const row = tds(strikeRow(f, 25100));
-    expect(row[1]!.querySelector('.acts')).toBeNull();
-    expect(row[11]!.querySelector('.acts')).not.toBeNull();
+    expect(row[4]!.querySelector('.acts')).toBeNull();
+    expect(row[6]!.querySelector('.acts')).not.toBeNull();
   });
 
   it('shows a dash with the reason in the title for a null IV, and italicises low-confidence IV', () => {
@@ -189,24 +244,24 @@ describe('ChainTableComponent mirrored', () => {
       { strike: 25500, type: 'CE', patch: { bid: null, ask: null, ltp: 0.3, volume: 10 } },
     ]);
     const f = setup(vm);
-    // greeks: iv is the outermost column; PE iv is the last data cell
-    const pe = tds(strikeRow(f, 24800)).at(-2)!;
+    // greeks: iv is the outermost column; PE iv is the last cell
+    const pe = tds(strikeRow(f, 24800)).at(-1)!;
     expect(val(pe)).toBe('–');
     expect(pe.getAttribute('title')).toBe('No two-sided quote and no trades today');
-    const low = tds(strikeRow(f, 25500))[1]!;
+    const low = tds(strikeRow(f, 25500))[0]!;
     expect(low.classList.contains('low-conf')).toBe(true);
     expect(low.getAttribute('title')).toBe('Low confidence: price within a few ticks, or under 1 hour to expiry');
-    const ok = tds(strikeRow(f, 25000))[1]!;
+    const ok = tds(strikeRow(f, 25000))[0]!;
     expect(ok.classList.contains('low-conf')).toBe(false);
   });
 
   it('dims the cells of a stale leg only', () => {
     const f = setup(makeVm(), { stale: new Set(['CE25000']) });
     const row = tds(strikeRow(f, 25000));
-    expect(row[1]!.classList.contains('stale')).toBe(true);
-    expect(row[5]!.classList.contains('stale')).toBe(true);
-    expect(row[7]!.classList.contains('stale')).toBe(false);
-    expect(row[11]!.classList.contains('stale')).toBe(false);
+    expect(row[0]!.classList.contains('stale')).toBe(true);
+    expect(row[4]!.classList.contains('stale')).toBe(true);
+    expect(row[6]!.classList.contains('stale')).toBe(false);
+    expect(row[10]!.classList.contains('stale')).toBe(false);
   });
 
   it('renders placeholder rows with no numbers and no spot line or sigma row while loading', () => {
@@ -219,17 +274,9 @@ describe('ChainTableComponent mirrored', () => {
     expect(el(f).querySelector('tfoot')).toBeNull();
   });
 
-  it('shows the sums in the Σ row for columns with sum', () => {
-    const vm = makeVm();
-    const f = setup(vm);
-    const cells = Array.from(el(f).querySelectorAll('tfoot td')).map(text);
-    // empty, volume, oi, bid, ask, ltp, Σ, ltp, ask, bid, oi, volume, empty
-    expect(cells.length).toBe(13);
-    expect(cells[2]).toBe((vm.sums['oi']!.ce / 1e5).toFixed(2));
-    expect(cells[1]).toBe((vm.sums['volume']!.ce / 1e5).toFixed(2));
-    expect(cells[6]).toBe('Σ');
-    expect(cells[10]).toBe((vm.sums['oi']!.pe / 1e5).toFixed(2));
-    expect(cells[3]).toBe('');
+  it('has no totals row under the chain (the space goes to the strikes)', () => {
+    const f = setup(makeVm());
+    expect(el(f).querySelector('tfoot')).toBeNull();
   });
 
   it('reflects checked tokens and emits toggleCheck', () => {
@@ -237,8 +284,11 @@ describe('ChainTableComponent mirrored', () => {
     const out: string[] = [];
     f.componentInstance.toggleCheck.subscribe((t) => out.push(t));
     const row = tds(strikeRow(f, 25000));
-    const ce = row[0]!.querySelector('input')!;
-    const pe = row[12]!.querySelector('input')!;
+    // Each box sits in the innermost cell of its side, next to the strike (not in the strike cell).
+    expect(row[5]!.querySelector('input')).toBeNull();
+    const ce = row[4]!.querySelector<HTMLInputElement>('input.cb.ce')!;
+    const pe = row[6]!.querySelector<HTMLInputElement>('input.cb.pe')!;
+    expect(el(f).querySelectorAll('tbody tr:not(.spot):first-child input.cb')).toHaveLength(2);
     expect(ce.checked).toBe(false);
     expect(pe.checked).toBe(true);
     expect(ce.getAttribute('aria-label')).toBe('Select 25000 CE');
@@ -246,14 +296,31 @@ describe('ChainTableComponent mirrored', () => {
     expect(out).toEqual(['CE25000']);
   });
 
+  it('a box follows the checked input, not the click (a refused tick stays unticked)', () => {
+    const f = setup(makeVm(), { checked: new Set(['PE25000']) });
+    const row = tds(strikeRow(f, 25000));
+    const ce = row[4]!.querySelector<HTMLInputElement>('input.cb.ce')!;
+    const pe = row[6]!.querySelector<HTMLInputElement>('input.cb.pe')!;
+    ce.click(); // the parent refuses: `checked` does not change
+    f.detectChanges();
+    expect(ce.checked).toBe(false);
+    pe.click();
+    f.detectChanges();
+    expect(pe.checked).toBe(true);
+    f.componentRef.setInput('checked', new Set(['CE25000']));
+    f.detectChanges();
+    expect(ce.checked).toBe(true);
+    expect(pe.checked).toBe(false);
+  });
+
   it('colours signed columns and uses the sub-line for change %', () => {
     const f = setup(makeVm());
-    const ceLtp = tds(strikeRow(f, 25000))[5]!;
+    const ceLtp = tds(strikeRow(f, 25000))[4]!;
     const sub = ceLtp.querySelector('.sub')!;
     expect(sub).not.toBeNull();
     // CE prevClose is above ltp, so change is negative; PE prevClose below ltp, so positive
     expect(sub.classList.contains('neg')).toBe(true);
-    expect(tds(strikeRow(f, 25000))[7]!.querySelector('.sub')!.classList.contains('pos')).toBe(true);
+    expect(tds(strikeRow(f, 25000))[6]!.querySelector('.sub')!.classList.contains('pos')).toBe(true);
   });
 });
 
@@ -270,15 +337,15 @@ describe('ChainTableComponent: payloads and tooltips', () => {
     const f = setup(withCeRef(makeVm(), { token: 'NFO|43651' }));
     const out: TradeEvent[] = [];
     f.componentInstance.trade.subscribe((e) => out.push(e));
-    tds(strikeRow(f, 25000))[1]!.querySelector<HTMLButtonElement>('.acts .b')!.click();
+    tds(strikeRow(f, 25000))[4]!.querySelector<HTMLButtonElement>('.acts .b')!.click();
     expect(out[0]).toMatchObject({ token: 'NFO|43651', exch: 'NFO', rawToken: '43651', side: 'BUY', lotSize: 65 });
   });
 
   it("prices show the contract's price precision (pp)", () => {
     const f = setup(withCeRef(makeVm(), { pricePrecision: 4 }));
     const row = tds(strikeRow(f, 25000));
-    expect(val(row[5]!)).toMatch(/^\d+\.\d{4}$/); // CE LTP, pp 4
-    expect(val(row[7]!)).toMatch(/^\d+\.\d{2}$/); // PE LTP, pp 2
+    expect(val(row[4]!)).toMatch(/^\d+\.\d{4}$/); // CE LTP, pp 4
+    expect(val(row[6]!)).toMatch(/^\d+\.\d{2}$/); // PE LTP, pp 2
   });
 
   it('OI and Volume cells carry the exact value, en-IN grouped, as a tooltip', () => {
@@ -286,9 +353,9 @@ describe('ChainTableComponent: payloads and tooltips', () => {
     const f = setup(vm);
     const row = tds(strikeRow(f, 25000));
     const oi = vm.rows.find((r) => r.strike === 25000)!.ce!.quote!.oi;
-    expect(row[2]!.getAttribute('title')).toBe(oi.toLocaleString('en-IN', { maximumFractionDigits: 2 }));
-    expect(row[1]!.getAttribute('title')).toMatch(/^[\d,]+$/); // Volume
-    expect(row[5]!.getAttribute('title')).toBeNull(); // LTP: no tooltip
+    expect(row[1]!.getAttribute('title')).toBe(oi.toLocaleString('en-IN', { maximumFractionDigits: 2 }));
+    expect(row[0]!.getAttribute('title')).toMatch(/^[\d,]+$/); // Volume
+    expect(row[4]!.getAttribute('title')).toBeNull(); // LTP: no tooltip
   });
 
   it('GEX headers and cells carry the sign-convention tooltip; Cum OI cells the exact value', () => {
@@ -307,23 +374,56 @@ describe('ChainTableComponent: payloads and tooltips', () => {
 });
 
 describe('ChainTableComponent strike mode', () => {
-  it('has Strike first, no checkboxes or B/S, Cum OI bar and a total Σ', () => {
+  it('has Strike first, no checkboxes or B/S, a Cum OI bar and no totals row', () => {
     const vm = makeVm('stats');
     const f = setup(vm);
     const heads = Array.from(el(f).querySelectorAll('thead th')).map(text);
     expect(heads[0]).toBe('Strike');
+    expect(heads).toContain('Cum OI (In Lacs)');
+    expect(heads).toContain('GEX-Vol (₹ Cr)');
     expect(el(f).querySelector('input[type=checkbox]')).toBeNull();
     expect(el(f).querySelector('.acts')).toBeNull();
+    expect(el(f).querySelector('.oil')).toBeNull();
     const cells = tds(strikeRow(f, 25000));
     expect(cells.length).toBe(1 + vm.columns.length);
     const cumIdx = vm.columns.findIndex((c) => c.id === 'cumOi') + 1;
     expect(cells[cumIdx]!.classList.contains('bar')).toBe(true);
     expect(cells[cumIdx]!.classList.contains('cum')).toBe(true);
-    const foot = Array.from(el(f).querySelectorAll('tfoot td')).map(text);
-    expect(foot[0]).toBe('Σ');
-    expect(foot[cumIdx]).toBe((vm.sums['cumOi']!.total / 1e5).toFixed(2));
+    expect(el(f).querySelector('tfoot')).toBeNull();
     const spot = el(f).querySelector('tr.spot')!;
     expect(spot.querySelectorAll('td').length).toBe(2);
     expect(strikeRow(f, 24950).nextElementSibling).toBe(spot);
+  });
+});
+
+describe('ChainTableComponent strike sort', () => {
+  const strikes = (f: ReturnType<typeof setup>): number[] =>
+    Array.from(el(f).querySelectorAll('tbody tr:not(.spot) td.k')).map((td) => Number(text(td)));
+
+  it('flips the strike order from the Strike header, and the spot line stays between the same two strikes', () => {
+    const f = setup(makeVm());
+    const btn = el(f).querySelector<HTMLButtonElement>('[data-testid="strike-sort"]')!;
+    const th = btn.closest('th')!;
+    const asc = strikes(f);
+    expect(asc).toEqual([...asc].sort((a, b) => a - b));
+    expect(th.getAttribute('aria-sort')).toBe('ascending');
+    expect(btn.getAttribute('aria-label')).toBe('Sort strikes high to low');
+    expect(btn.querySelectorAll('.ar.on').length).toBe(1);
+    const spotAsc = el(f).querySelector('tr.spot')!;
+    const below = spotAsc.previousElementSibling!.querySelector('td.k')!.textContent!.trim();
+    const above = spotAsc.nextElementSibling!.querySelector('td.k')!.textContent!.trim();
+
+    btn.click();
+    f.detectChanges();
+    expect(strikes(f)).toEqual([...asc].reverse());
+    expect(th.getAttribute('aria-sort')).toBe('descending');
+    expect(btn.getAttribute('aria-label')).toBe('Sort strikes low to high');
+    const spot = el(f).querySelector('tr.spot')!;
+    expect(spot.previousElementSibling!.querySelector('td.k')!.textContent!.trim()).toBe(above);
+    expect(spot.nextElementSibling!.querySelector('td.k')!.textContent!.trim()).toBe(below);
+
+    btn.click();
+    f.detectChanges();
+    expect(strikes(f)).toEqual(asc);
   });
 });

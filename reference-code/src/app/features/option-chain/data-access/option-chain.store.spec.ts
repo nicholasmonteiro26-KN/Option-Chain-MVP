@@ -63,6 +63,94 @@ describe('OptionChainStore', () => {
     expect(store.quotes().get('NFO|1')!()).toMatchObject({ oi: 10, prevOi: 8, volume: 3 });
   });
 
+  it('applyTicks feeds legPrices for held keys, including keys not in the chain', () => {
+    store.setChain(META);
+    store.setLegKeys(new Set(['NFO|900', 'NFO|1']));
+    store.applyTicks(new Map([
+      ['NFO|900', { token: 'NFO|900', ltp: 12.5 }],
+      ['NFO|3', { token: 'NFO|3', ltp: 7 }],
+    ]));
+    expect(store.legPrices()).toEqual(new Map([['NFO|900', 12.5]]));
+  });
+
+  it('a held chain leg updates both its quote and legPrices; a tick without ltp keeps the last price', () => {
+    store.setChain(META);
+    store.setLegKeys(new Set(['NFO|1']));
+    store.applyTicks(new Map([['NFO|1', { token: 'NFO|1', ltp: 90 }]]));
+    store.applyTicks(new Map([['NFO|1', { token: 'NFO|1', oi: 5 }]]));
+    expect(store.quotes().get('NFO|1')!()).toMatchObject({ ltp: 90, oi: 5 });
+    expect(store.legPrices().get('NFO|1')).toBe(90);
+  });
+
+  it('publishes legPrices once per batch and not when nothing changed', () => {
+    store.setLegKeys(new Set(['NFO|900', 'NFO|901']));
+    const before = store.legPrices();
+    store.applyTicks(new Map([
+      ['NFO|900', { token: 'NFO|900', ltp: 1 }],
+      ['NFO|901', { token: 'NFO|901', ltp: 2 }],
+    ]));
+    const after = store.legPrices();
+    expect(after).not.toBe(before);
+    expect(after.size).toBe(2);
+    store.applyTicks(new Map([['NFO|555', { token: 'NFO|555', ltp: 3 }]]));
+    expect(store.legPrices()).toBe(after);
+  });
+
+  it('holding a key already in the chain seeds legPrices from its known ltp, with no tick', () => {
+    store.setChain(META);
+    store.applyTicks(new Map([['NFO|1', { token: 'NFO|1', ltp: 42 }]]));
+    store.setLegKeys(new Set(['NFO|1', 'NFO|2'])); // NFO|2 has no ltp yet: no entry
+    expect(store.legPrices()).toEqual(new Map([['NFO|1', 42]]));
+  });
+
+  it('legPrices survive a chain re-install for a held key', () => {
+    store.setChain(META);
+    store.setLegKeys(new Set(['NFO|1']));
+    store.applyTicks(new Map([['NFO|1', { token: 'NFO|1', ltp: 42 }]]));
+    store.setChain({ ...META, expiry: { ...META.expiry, iso: '2026-11-17' } });
+    expect(store.legPrices().get('NFO|1')).toBe(42);
+  });
+
+  // The transport ref-counts: a key subscribed as a held leg gets no fresh snapshot (prev close, prev OI, open) when
+  // the chain subscribes it too. The chain row must still show them (else Chg / Chg % read "–").
+  it('a held leg snapshot received before the chain shows it seeds the chain row (prev close, prev OI, open)', () => {
+    store.setLegKeys(new Set(['NFO|1']));
+    store.applyTicks(new Map([['NFO|1', { token: 'NFO|1', ltp: 90, prevClose: 80, prevOi: 1000, open: 82, oi: 1200 }]]));
+    store.applyTicks(new Map([['NFO|1', { token: 'NFO|1', ltp: 91 }]]));
+    store.setChain(META);
+    expect(store.quotes().get('NFO|1')!()).toMatchObject({ ltp: 91, prevClose: 80, prevOi: 1000, open: 82, oi: 1200 });
+    expect(store.quotes().get('NFO|2')!().prevClose).toBeNull();
+  });
+
+  it('a held leg keeps its prev close when its chain is re-installed (expiry switch away and back)', () => {
+    store.setChain(META);
+    store.applyTicks(new Map([['NFO|1', { token: 'NFO|1', ltp: 90, prevClose: 80 }]]));
+    store.setLegKeys(new Set(['NFO|1']));
+    store.setChain({ ...META, strikes: [] });
+    store.setChain(META);
+    expect(store.quotes().get('NFO|1')!()).toMatchObject({ ltp: 90, prevClose: 80 });
+  });
+
+  it('a contract neither on the chain nor held is forgotten (a later subscription gets a fresh snapshot)', () => {
+    store.setChain(META);
+    store.applyTicks(new Map([['NFO|1', { token: 'NFO|1', ltp: 90, prevClose: 80 }]]));
+    store.setChain({ ...META, strikes: [] });
+    store.setChain(META);
+    expect(store.quotes().get('NFO|1')!().prevClose).toBeNull();
+  });
+
+  it('setLegKeys drops keys no longer held', () => {
+    store.setLegKeys(new Set(['NFO|900', 'NFO|901']));
+    store.applyTicks(new Map([
+      ['NFO|900', { token: 'NFO|900', ltp: 1 }],
+      ['NFO|901', { token: 'NFO|901', ltp: 2 }],
+    ]));
+    store.setLegKeys(new Set(['NFO|901']));
+    expect([...store.legPrices().keys()]).toEqual(['NFO|901']);
+    store.applyTicks(new Map([['NFO|900', { token: 'NFO|900', ltp: 5 }]]));
+    expect([...store.legPrices().keys()]).toEqual(['NFO|901']);
+  });
+
   it('setChain builds a fresh quotes map per load', () => {
     store.setChain(META);
     const first = store.quotes();

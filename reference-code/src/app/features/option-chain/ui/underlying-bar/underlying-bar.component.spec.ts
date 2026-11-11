@@ -213,17 +213,35 @@ describe('UnderlyingBarComponent', () => {
     expect(ev.defaultPrevented).toBe(true);
   });
 
-  it('reads the OHLC line with lot', () => {
-    const t = el().querySelector('.ohlc')!.textContent!.replace(/\s+/g, ' ').trim();
-    expect(t).toBe('O 24,900.00 H 25,010.50 L 24,880.00 Prev close 24,840.25 Lot 20 (this expiry)');
+  it('draws the day as a candle: wick low to high, body open to last price, all values in its name', () => {
+    set('ltp', 24990);
+    f.detectChanges();
+    const k = el().querySelector<HTMLElement>('[data-testid="ohlc-candle"]')!;
+    expect(k.getAttribute('role')).toBe('img');
+    expect(k.getAttribute('aria-label')).toBe(
+      'Day range: Open 24,900.00, High 25,010.50, Low 24,880.00, Last 24,990.00, Prev close 24,840.25');
+    const ends = Array.from(k.querySelectorAll('.end')).map((e) => e.textContent!.trim());
+    expect(ends).toEqual(['L 24,880.00', 'H 25,010.50']);
+    // range 130.5: open at 20/130.5, last at 110/130.5
+    const body = k.querySelector<HTMLElement>('.body')!;
+    expect(body.classList).toContain('pos');
+    expect(parseFloat(body.style.left)).toBeCloseTo(15.33, 1);
+    expect(parseFloat(body.style.width)).toBeCloseTo(68.97, 1);
+    expect(parseFloat(k.querySelector<HTMLElement>('.tick')!.style.left)).toBeCloseTo(15.33, 1);
+    expect(parseFloat(k.querySelector<HTMLElement>('.dot')!.style.left)).toBeCloseTo(84.29, 1);
+    expect(el().querySelector('.lot')!.textContent!.replace(/\s+/g, ' ').trim()).toBe('Lot 20');
+    set('ltp', 24850); // below the open and the low: red, the dot clamped to the left end
+    f.detectChanges();
+    expect(k.querySelector('.body')!.classList).toContain('neg');
+    expect(parseFloat(k.querySelector<HTMLElement>('.dot')!.style.left)).toBe(0);
   });
 
-  it('omits Lot when lotSize is null and shows dashes for null values', () => {
+  it('omits the candle until low and high are known, and Lot when lotSize is null', () => {
     set('lotSize', null);
     set('ohlc', { open: null, high: null, low: null, prevClose: null });
     f.detectChanges();
-    const t = el().querySelector('.ohlc')!.textContent!.replace(/\s+/g, ' ').trim();
-    expect(t).toBe('O – H – L – Prev close –');
+    expect(el().querySelector('[data-testid="ohlc-candle"]')).toBeNull();
+    expect(el().querySelector('.lot')).toBeNull();
   });
 
   it('shows LTP and change vs previous close after the exchange tag, en-IN, coloured by sign', () => {

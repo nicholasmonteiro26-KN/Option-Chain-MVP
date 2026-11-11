@@ -4,8 +4,12 @@ import { OptionChainPageComponent } from './option-chain-page.component';
 
 /**
  * `/option-chain?underlying=<EXCH>:<SYM>[&expiry=<YYYY-MM-DD>][&feed=mock]`, lazy-loaded by the app routes. The
- * feature's providers live on the page component (not the route), so they are destroyed with the page.
+ * feature's providers live on the page component (not the route), so they are destroyed with the page. In-app
+ * navigation away asks the page first: it is refused while strategy orders are being placed.
  */
 export const OPTION_CHAIN_ROUTES: Routes = [
-  { path: '', component: OptionChainPageComponent, title: 'Option Chain', canActivate: [optionChainAuthGuard] },
+  {
+    path: '', component: OptionChainPageComponent, title: 'Option Chain', canActivate: [optionChainAuthGuard],
+    canDeactivate: [(page: OptionChainPageComponent) => page.canLeave()],
+  },
 ];

@@ -162,3 +162,35 @@ describe('MockKambalaRestClient', () => {
     expect((await rest.searchScrip('INFY'))[0]).toMatchObject({ exch: 'NSE', tsym: 'INFY-EQ', token: '1594' });
   });
 });
+
+describe('MockMarket rolling expiries (demo calendar)', () => {
+  /** Wed 2026-11-11 10:00 IST. */
+  const WED = Date.UTC(2026, 10, 11, 4, 30, 0);
+  const isos = (exch: string, token: string, now = WED) =>
+    new MockMarket({ now: () => now, rollingExpiries: true }).linkedScrips(exch, token).opt_exp.map((e) => parseExd(e.exd));
+
+  it('NIFTY: 4 Tuesday weeklies, monthlies, quarterlies and half-yearlies, ascending, from today', () => {
+    const n = isos('NSE', '26000');
+    expect(n.slice(0, 7)).toEqual(['2026-11-17', '2026-11-24', '2026-12-01', '2026-12-08', '2026-12-29', '2027-01-26', '2027-03-30']);
+    expect(n).toContain('2027-06-29');
+    expect(n).toContain('2027-09-28');
+    expect(n).toContain('2030-12-31');
+    expect(n.length).toBeGreaterThanOrEqual(15);
+    expect([...n].sort()).toEqual(n);
+  });
+
+  it('SENSEX expires on Thursdays (today included) with lot 25 from Jan 2027', () => {
+    const m = new MockMarket({ now: () => Date.UTC(2026, 10, 12, 4, 30, 0), rollingExpiries: true });
+    const s = m.linkedScrips('BSE', '1').opt_exp.map((e) => parseExd(e.exd));
+    expect(s.slice(0, 4)).toEqual(['2026-11-12', '2026-11-19', '2026-11-26', '2026-12-03']);
+    expect(s).toContain('2027-01-28');
+  });
+
+  it('stocks list the next 3 monthly expiries (last Tuesday)', () => {
+    expect(isos('NSE', '2885')).toEqual(['2026-11-24', '2026-12-29', '2027-01-26']);
+  });
+
+  it('without the option the fixed sample dates stay (tests rely on them)', () => {
+    expect(market().linkedScrips('NSE', '26000').opt_exp[0]!.exd).toBe('03-NOV-2026');
+  });
+});
