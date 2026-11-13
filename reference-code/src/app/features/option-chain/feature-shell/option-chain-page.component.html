@@ -12,8 +12,6 @@
     (select)="onSelectUnderlying($event)"
     (search)="onSearch($event)"
   >
-    <!-- Page tools sit at the right of the search box (no separate title row). -->
-    <oc-theme-toggle />
   </oc-underlying-bar>
 
   <oc-view-toolbar
@@ -34,6 +32,7 @@
       [nowMs]="nowMs()"
       [stats]="stats()"
       [feedStatus]="store.feedStatus()"
+      [marketOpen]="session.isOpen()"
       [partial]="store.partialChain()"
       (expiryChange)="onExpiry($event)"
     />
@@ -94,10 +93,14 @@
         (swap)="onSwap($event)"
         (lotMultiplier)="strategy.setLotMultiplier($event)"
         (product)="strategy.setProduct($event)"
-        (resetPrices)="strategy.resetPrices(store.legPrices())"
+        (resetPrices)="strategy.resetPrices(bookOf)"
+        (priceTypeAll)="onPriceTypeAll($event)"
         (retryMargin)="margin.retry()"
         (saveToBasket)="onSaveToBasket()"
         (execute)="onExecute()"
+        [cancelling]="cancelling()"
+        (cancelOpen)="onCancelOpen()"
+        (retryFailed)="onRetryFailed()"
         (collapse)="onCollapseStrategy()"
       />
     }

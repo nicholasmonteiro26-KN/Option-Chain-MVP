@@ -37,6 +37,12 @@ describe('StrategyPanelComponent', () => {
   };
   const text = (e: Element | null): string => (e?.textContent ?? '').replace(/\s+/g, ' ').trim();
   const rows = (): HTMLTableRowElement[] => Array.from(el().querySelectorAll('tbody tr'));
+  /** The row of a leg by id (rows are shown buys first, so not in the strategy's order). */
+  const row = (id: string): HTMLTableRowElement => {
+    const r = el().querySelector<HTMLTableRowElement>(`tbody tr[data-leg="${id}"]`);
+    if (!r) throw new Error(`no row for ${id}`);
+    return r;
+  };
   const byLabel = <T extends HTMLElement>(root: ParentNode, label: string): T => {
     const hit = root.querySelector<T>(`[aria-label="${label}"]`);
     if (!hit) throw new Error(`no control labelled "${label}"`);
@@ -77,10 +83,10 @@ describe('StrategyPanelComponent', () => {
 
   it('renders one row per leg with side, expiry, strike, type, lots and price', () => {
     expect(rows()).toHaveLength(3);
-    const r = rows()[0]!;
+    const r = row('leg-1')!;
     expect(text(r.querySelector('.bs'))).toBe('S');
     expect(r.querySelector('.bs')!.classList).toContain('s');
-    expect(rows()[2]!.querySelector('.bs')!.classList).toContain('b');
+    expect(row('leg-3')!.querySelector('.bs')!.classList).toContain('b');
     const [exp, strike] = Array.from(r.querySelectorAll('select'));
     expect(exp!.value).toBe('2026-11-10');
     expect(text(exp!.selectedOptions[0]!)).toBe('10 Nov 2026');
@@ -89,7 +95,7 @@ describe('StrategyPanelComponent', () => {
     expect(Array.from(strike!.options).map((o) => Number(o.value))).toEqual(STRIKES);
     expect(text(r.querySelector('.type'))).toBe('CE');
     expect(r.querySelector('.type')!.classList).toContain('ce');
-    expect(rows()[1]!.querySelector('.type')!.classList).toContain('pe');
+    expect(row('leg-2')!.querySelector('.type')!.classList).toContain('pe');
     expect(text(r.querySelector('.lots output'))).toBe('1');
     expect(r.querySelector<HTMLInputElement>('input.px')!.value).toBe('69.90');
     expect(text(r.querySelector('.live'))).toBe('Live 70.10');
@@ -97,7 +103,7 @@ describe('StrategyPanelComponent', () => {
 
   it('B/S, lots ± and the include box emit edit', () => {
     const edit = spy(f.componentInstance.edit);
-    const r = rows()[2]!;
+    const r = row('leg-3')!;
     (r.querySelector('.bs') as HTMLButtonElement).click();
     expect(edit).toHaveBeenLastCalledWith({ id: 'leg-3', edit: { side: 'S' } });
     byLabel<HTMLButtonElement>(r, 'More lots, 23000 CE 10 Nov 2026').click();
@@ -114,12 +120,12 @@ describe('StrategyPanelComponent', () => {
 
   it('lots − at 1 stays disabled', () => {
     const edit = spy(f.componentInstance.edit);
-    const less = byLabel<HTMLButtonElement>(rows()[0]!, 'Fewer lots, 22850 CE 10 Nov 2026');
+    const less = byLabel<HTMLButtonElement>(row('leg-1')!, 'Fewer lots, 22850 CE 10 Nov 2026');
     expect(less.disabled).toBe(true);
     less.click();
     expect(edit).not.toHaveBeenCalled();
     withLegs([{ ...LEGS[0]!, lots: 3 }]);
-    const less2 = byLabel<HTMLButtonElement>(rows()[0]!, 'Fewer lots, 22850 CE 10 Nov 2026');
+    const less2 = byLabel<HTMLButtonElement>(row('leg-1')!, 'Fewer lots, 22850 CE 10 Nov 2026');
     expect(less2.disabled).toBe(false);
     less2.click();
     expect(edit).toHaveBeenLastCalledWith({ id: 'leg-1', edit: { lots: 2 } });
@@ -127,20 +133,20 @@ describe('StrategyPanelComponent', () => {
 
   it('changing the strike or expiry select emits swap with the new values', () => {
     const swap = spy(f.componentInstance.swap);
-    const [exp, strike] = Array.from(rows()[1]!.querySelectorAll('select'));
+    const [exp, strike] = Array.from(row('leg-2')!.querySelectorAll('select'));
     strike!.value = '22950';
     strike!.dispatchEvent(new Event('change'));
     expect(swap).toHaveBeenLastCalledWith({ id: 'leg-2', expiryIso: '2026-11-10', strike: 22950, type: 'PE' });
     exp!.value = '2026-11-17';
     exp!.dispatchEvent(new Event('change'));
     expect(swap).toHaveBeenLastCalledWith({ id: 'leg-2', expiryIso: '2026-11-17', strike: 22900, type: 'PE' });
-    (rows()[1]!.querySelector('.type') as HTMLButtonElement).click();
+    (row('leg-2')!.querySelector('.type') as HTMLButtonElement).click();
     expect(swap).toHaveBeenLastCalledWith({ id: 'leg-2', expiryIso: '2026-11-10', strike: 22900, type: 'CE' });
   });
 
   it('a select shows the leg, not the pick: a refused swap leaves the row as it was; an accepted one updates it', () => {
     const swap = spy(f.componentInstance.swap);
-    const selects = () => Array.from(rows()[1]!.querySelectorAll('select'));
+    const selects = () => Array.from(row('leg-2')!.querySelectorAll('select'));
     const [exp, strike] = selects();
     strike!.value = '22950';
     strike!.dispatchEvent(new Event('change'));
@@ -168,28 +174,78 @@ describe('StrategyPanelComponent', () => {
 
   it('disables the strike select while its options load', () => {
     set('pickerFor', () => ({ strikes: [], ready: false }));
-    const strike = rows()[0]!.querySelectorAll('select')[1]!;
+    const strike = row('leg-1')!.querySelectorAll('select')[1]!;
     expect(strike.disabled).toBe(true);
     expect(strike.value).toBe('22850');
   });
 
-  it('MKT toggle emits priceType and disables the price input; hidden on BFO legs', () => {
+  it('opens with buy legs on top, then sells (each group in the order added)', () => {
+    expect(rows().map((r) => r.getAttribute('data-leg'))).toEqual(['leg-3', 'leg-1', 'leg-2']);
+    expect(rows().map((r) => text(r.querySelector('.bs')))).toEqual(['B', 'S', 'S']);
+  });
+
+  it('a row never jumps while edited: flipping B ↔ S keeps it in place; a new leg re-sorts buys first', () => {
+    const ids = (): (string | null)[] => rows().map((r) => r.getAttribute('data-leg'));
+    // The buy on top becomes a sell: it stays where it is.
+    withLegs([LEGS[0]!, LEGS[1]!, { ...LEGS[2]!, side: 'S' }]);
+    expect(ids()).toEqual(['leg-3', 'leg-1', 'leg-2']);
+    withLegs([{ ...LEGS[0]!, side: 'B' }, LEGS[1]!, { ...LEGS[2]!, side: 'S' }]);
+    expect(ids()).toEqual(['leg-3', 'leg-1', 'leg-2']);
+    // A leg added: buys first again.
+    withLegs([{ ...LEGS[0]!, side: 'B' }, LEGS[1]!, { ...LEGS[2]!, side: 'S' }, leg({ id: 'leg-4', token: 'NFO|4', strike: 22800, type: 'PE' })]);
+    expect(ids()).toEqual(['leg-1', 'leg-4', 'leg-2', 'leg-3']);
+  });
+
+  it('with buys and sells, a note says buys go first, and the confirm step lists them in sending order', () => {
+    withLegs([LEGS[0]!, LEGS[1]!, { ...LEGS[2]!, side: 'S' }]); // all sells now (row stays put): no note
+    expect(el().querySelector('[data-testid="order-note"]')).toBeNull();
+    withLegs([LEGS[0]!, LEGS[1]!, LEGS[2]!]);
+    expect(text(el().querySelector('[data-testid="order-note"]'))).toBe('Buy legs are placed first, for the margin benefit.');
+    withLegs([{ ...LEGS[0]!, side: 'B' }, LEGS[1]!, { ...LEGS[2]!, side: 'S' }]); // rows: leg-3 (S) on top, leg-1 (B)
+    expect(rows()[0]!.getAttribute('data-leg')).toBe('leg-3');
+    button('Execute all').click();
+    f.detectChanges();
+    const items = Array.from(el().querySelectorAll('.confirm li')).map(text);
+    expect(items[0]).toMatch(/^BUY 22850 CE/); // sent first, though shown below a sell
+  });
+
+  it('each leg has a Limit | Market switch; Market shows "At market" instead of a price; Market is off on BSE (BFO) legs', () => {
     const edit = spy(f.componentInstance.edit);
-    const mkt = rows()[0]!.querySelector<HTMLButtonElement>('.mkt')!;
-    expect(text(mkt)).toBe('MKT');
-    expect(mkt.getAttribute('aria-pressed')).toBe('false');
-    mkt.click();
+    const seg = byLabel<HTMLElement>(row('leg-1'), 'Order type, 22850 CE 10 Nov 2026');
+    const [lim, mkt] = Array.from(seg.querySelectorAll('button'));
+    expect([text(lim!), text(mkt!)]).toEqual(['Limit', 'Market']);
+    expect(lim!.getAttribute('aria-pressed')).toBe('true'); // limit is the default
+    expect(mkt!.getAttribute('aria-pressed')).toBe('false');
+    lim!.click();
+    expect(edit).not.toHaveBeenCalled(); // already limit
+    mkt!.click();
     expect(edit).toHaveBeenLastCalledWith({ id: 'leg-1', edit: { priceType: 'MKT' } });
 
     withLegs([{ ...LEGS[0]!, priceType: 'MKT' }, { ...LEGS[1]!, exch: 'BFO', token: 'BFO|2' }]);
-    const [r0, r1] = rows();
-    expect(r0!.querySelector<HTMLInputElement>('input.px')!.disabled).toBe(true);
-    expect(r0!.querySelector('.mkt')!.getAttribute('aria-pressed')).toBe('true');
-    (r0!.querySelector('.mkt') as HTMLButtonElement).click();
+    const r1 = row('leg-1');
+    expect(r1.querySelector('input.px')).toBeNull();
+    expect(text(r1.querySelector('.atmkt'))).toBe('At market');
+    byLabel<HTMLElement>(r1, 'Order type, 22850 CE 10 Nov 2026').querySelector<HTMLButtonElement>('button')!.click();
     expect(edit).toHaveBeenLastCalledWith({ id: 'leg-1', edit: { priceType: 'LMT' } });
-    expect(r1!.querySelector('.mkt')).toBeNull();
-    expect(r1!.querySelector<HTMLInputElement>('input.px')!.disabled).toBe(false);
+    const bfoMkt = byLabel<HTMLElement>(row('leg-2'), 'Order type, 22900 PE 10 Nov 2026').querySelectorAll('button')[1]!;
+    expect(bfoMkt.disabled).toBe(true);
+    expect(bfoMkt.getAttribute('title')).toBe('Market orders are not available on BFO. Use a limit price.');
+    expect(row('leg-2').querySelector('input.px')).not.toBeNull();
   });
+
+  it('"All legs: Limit / Market" in the header shows the common type (none when mixed) and emits priceTypeAll', () => {
+    const all = spy(f.componentInstance.priceTypeAll);
+    const group = el().querySelector('.head .seg')!;
+    const [lim, mkt] = Array.from(group.querySelectorAll('button'));
+    expect(lim!.getAttribute('aria-pressed')).toBe('true');
+    mkt!.click();
+    expect(all).toHaveBeenLastCalledWith('MKT');
+    withLegs([{ ...LEGS[0]!, priceType: 'MKT' }, LEGS[1]!]);
+    const [l2, m2] = Array.from(el().querySelectorAll('.head .seg button'));
+    expect(l2!.getAttribute('aria-pressed')).toBe('false');
+    expect(m2!.getAttribute('aria-pressed')).toBe('false');
+  });
+
 
   it('↻ resets prices, the delete buttons remove and clear all', () => {
     const reset = spy(f.componentInstance.resetPrices);
@@ -246,7 +302,7 @@ describe('StrategyPanelComponent', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  it('Execute all opens the confirm step listing every included leg (side, contract, qty, price or MKT) and "Place 3 orders"', () => {
+  it('Execute all opens the confirm step: buys first, BUY / SELL, qty and a LIMIT ₹price or MARKET badge; "Place 3 orders"', () => {
     withStrategy({
       lotMultiplier: 2,
       legs: [{ ...LEGS[0]!, priceType: 'MKT' }, LEGS[1]!, LEGS[2]!, leg({ id: 'leg-4', token: 'NFO|4', strike: 22800, type: 'PE', included: false })],
@@ -256,10 +312,11 @@ describe('StrategyPanelComponent', () => {
     expect(el().querySelector('table')).toBeNull();
     const items = Array.from(el().querySelectorAll('.confirm li')).map(text);
     expect(items).toEqual([
-      'S 22850 CE 10 Nov 2026 · Qty 150 · MKT',
-      'S 22900 PE 10 Nov 2026 · Qty 150 · 68.85',
-      'B 23000 CE 10 Nov 2026 · Qty 150 · 14.95',
+      'BUY 23000 CE 10 Nov 2026 · Qty 150 LIMIT ₹14.95',
+      'SELL 22850 CE 10 Nov 2026 · Qty 150 MARKET',
+      'SELL 22900 PE 10 Nov 2026 · Qty 150 LIMIT ₹68.85',
     ]);
+    expect(el().querySelector('.confirm li .otb.mk')).not.toBeNull();
     expect(text(el().querySelector('.confirm'))).toContain('₹ 1,18,420');
     expect(text(el().querySelector('.confirm'))).toContain('Intraday');
     expect(button('Place 3 orders')).toBeTruthy();
@@ -325,7 +382,7 @@ describe('StrategyPanelComponent', () => {
 
   it('a typed limit price is rounded to the tick size (12.33 → 12.35)', () => {
     const edit = spy(f.componentInstance.edit);
-    const input = byLabel<HTMLInputElement>(rows()[0]!, 'Limit price, 22850 CE 10 Nov 2026');
+    const input = byLabel<HTMLInputElement>(row('leg-1')!, 'Limit price, 22850 CE 10 Nov 2026');
     input.value = '12.33';
     input.dispatchEvent(new Event('change'));
     expect(edit).toHaveBeenLastCalledWith({ id: 'leg-1', edit: { price: 12.35 } });
@@ -339,7 +396,7 @@ describe('StrategyPanelComponent', () => {
   });
 
   it('the lots cell shows the quantity on hover (lots × Lot× × lot size)', () => {
-    const lots = () => rows()[0]!.querySelector<HTMLElement>('.lots')!;
+    const lots = () => row('leg-1')!.querySelector<HTMLElement>('.lots')!;
     expect(lots().title).toBe('1 lot × 75 = 75');
     withStrategy({ legs: [{ ...LEGS[0]!, lots: 2 }], lotMultiplier: 3 });
     expect(lots().title).toBe('6 lots × 75 = 450');

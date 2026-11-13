@@ -27,7 +27,8 @@ import { MockMarket } from '../data-access/testing/mock-market';
 import { toCsv } from '../export/csv-export';
 import { executeStrategy } from '../strategy/execute-strategy';
 import { StrategyMarginService } from '../strategy/strategy-margin.service';
-import { isSendable, LegContract, legQty, Product, StrategyLeg } from '../strategy/strategy.models';
+import { isOpenOrder, isSendable, LegContract, legQty, Product, StrategyLeg } from '../strategy/strategy.models';
+import { OrderTracker } from '../strategy/order-tracker.service';
 import { StrategyStore } from '../strategy/strategy.store';
 import {
   ChainTableComponent, ContractAction, ContractActionEvent, TradeEvent,
@@ -39,7 +40,6 @@ import { ExpiryStats, ExpiryStripComponent, formatExpiryDate } from '../ui/expir
 import { FooterActionsComponent } from '../ui/footer-actions/footer-actions.component';
 import { BannerKind, StatusBannerComponent } from '../ui/status-banner/status-banner.component';
 import { Ohlc, QuickPrice, UnderlyingBarComponent } from '../ui/underlying-bar/underlying-bar.component';
-import { ThemeToggleComponent } from '../ui/theme-toggle/theme-toggle.component';
 import { LegSwap, StrategyPanelComponent } from '../ui/strategy-panel/strategy-panel.component';
 import { StrikeCount, ViewToolbarComponent } from '../ui/view-toolbar/view-toolbar.component';
 import { buildViewModel, ChainViewModel } from '../view/chain-view-model';
@@ -99,6 +99,9 @@ function chainKey(u: Underlying, expiryIso: string): string {
 }
 
 /** A search row as an option underlying. INTEGRATION: filter to F&O underlyings once Kambala says how (Q8). */
+/** Search order of options exchanges: NFO first (most liquid), then BFO, then anything else. */
+export const FO_EXCH_RANK = (foExch: string): number => ({ NFO: 0, BFO: 1 } as Record<string, number>)[foExch] ?? 2;
+
 export function searchRowToUnderlying(
   r: ScripSearchResult, quickList: readonly Underlying[] = QUICK_UNDERLYINGS,
 ): Underlying | null {
@@ -119,7 +122,7 @@ export function searchRowToUnderlying(
   selector: 'oc-option-chain-page',
   imports: [
     UnderlyingBarComponent, ViewToolbarComponent, ExpiryStripComponent, StatusBannerComponent, ColumnChooserComponent,
-    ChainTableComponent, FooterActionsComponent, ThemeToggleComponent, StrategyPanelComponent,
+    ChainTableComponent, FooterActionsComponent, StrategyPanelComponent,
   ],
   // The feature's services live and die with the page (not the route): store, facade, socket / mock feed, worker.
   providers: provideOptionChain(),
@@ -141,6 +144,9 @@ export class OptionChainPageComponent {
   private readonly mockMode = inject(OPTION_CHAIN_MOCK_MODE);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly transport = inject(FEED_TRANSPORT);
+  private readonly tracker = inject(OrderTracker);
+  /** Cancel open orders is in progress. */
+  protected readonly cancelling = signal(false);
   protected readonly session = inject(MarketSessionService);
   private readonly auth = inject(AuthSessionService);
   private readonly router = inject(Router);
@@ -283,11 +289,12 @@ export class OptionChainPageComponent {
     return k === 'error' || k === 'reconnecting' ? k : null;
   });
 
-  /** Quiet states (market closed, analytics off) sit in the toolbar beside the Strikes picker, taking no rows. */
+  /**
+   * Quiet states sit in the toolbar beside the Strikes picker, taking no rows. Market closed has no notice: the feed
+   * dot turns red instead (no closing time is shown, so exchange timing changes need no copy change).
+   */
   protected readonly notice = computed<string | null>(() => {
     switch (this.bannerKind()) {
-      case 'closed':
-        return 'Market closed · Prices as of 15:30';
       case 'analytics-unavailable':
         return 'Analytics unavailable · Prices are live';
       default:
@@ -514,6 +521,8 @@ export class OptionChainPageComponent {
       seen.add(`${u.exch}|${u.token}`);
       results.push(u);
     }
+    // NSE (NFO options) before BSE (BFO): NFO has the volume and liquidity. Otherwise Kambala's order is kept.
+    results.sort((a, b) => FO_EXCH_RANK(a.foExch) - FO_EXCH_RANK(b.foExch));
     this.searchResults.set(results);
     this.resultsFor.set(q);
   }
@@ -590,7 +599,7 @@ export class OptionChainPageComponent {
   private focusStrategyButton(): void {
     const el = this.host.nativeElement;
     const btn = el.querySelector<HTMLButtonElement>('oc-footer-actions button.strategy');
-    (btn && !btn.disabled ? btn : el.querySelector<HTMLElement>('oc-chain-table .tbl-wrap'))?.focus();
+    (btn && btn.getAttribute('aria-disabled') !== 'true' ? btn : el.querySelector<HTMLElement>('oc-chain-table .tbl-wrap'))?.focus();
   }
 
   /**
@@ -626,13 +635,48 @@ export class OptionChainPageComponent {
     const key = this.strategy.activeKey();
     this.placing.set(true);
     try {
-      await executeStrategy(
+      const results = await executeStrategy(
         s, this.store.legPrices(), (o) => this.rest.placeOrder(o), (r) => this.strategy.setResults(r, key),
         () => this.destroyed || this.leaving,
       );
+      // "Placed" only means Kambala accepted the order: follow each one until it is filled, rejected or cancelled.
+      const placed = [...results].flatMap(([legId, r]) => (r.status === 'placed' && r.orderNo ? [{ legId, orderNo: r.orderNo }] : []));
+      if (placed.length && !this.destroyed) this.tracker.track(key, placed);
     } finally {
       this.placing.set(false);
     }
+  }
+
+  /** Cancels every placed order that is still open or partly filled (the unfilled rest), then re-checks them. */
+  protected async onCancelOpen(): Promise<void> {
+    if (this.cancelling()) return;
+    const open = this.strategy.current().legs.filter(isOpenOrder);
+    if (open.length === 0) return;
+    this.cancelling.set(true);
+    let failed = 0;
+    try {
+      for (const l of open) {
+        const r = l.result;
+        if (r?.status !== 'placed') continue;
+        try {
+          await this.rest.cancelOrder(r.orderNo);
+        } catch (err) {
+          if (err instanceof SessionExpiredError) { this.facade.markSessionExpired(); return; }
+          failed++;
+        }
+      }
+      await this.tracker.refresh();
+    } finally {
+      this.cancelling.set(false);
+    }
+    if (failed) this.showStatus(`${failed === 1 ? '1 order' : `${failed} orders`} could not be cancelled (already filled or closed). Check the order book.`);
+  }
+
+  /** Puts the failed legs (rejected, not sent, cancelled unfilled) back into the strategy for another Execute all. */
+  protected onRetryFailed(): void {
+    if (this.refusedWhilePlacing()) return;
+    const n = this.strategy.retryFailed();
+    if (n === 0) this.showStatus('Nothing to retry');
   }
 
   /**
@@ -647,6 +691,16 @@ export class OptionChainPageComponent {
   private refusedWhilePlacing(): boolean {
     if (this.placing()) this.showStatus('Orders are being placed…');
     return this.placing();
+  }
+
+  /** Last price and best bid / ask by feed key (Reset prices). */
+  protected readonly bookOf = (key: string) => this.store.bookOf(key);
+
+  /** "All legs: Limit / Market". BSE (BFO) legs stay limit orders on Market; the status line says so. */
+  protected onPriceTypeAll(priceType: 'LMT' | 'MKT'): void {
+    if (this.refusedWhilePlacing()) return;
+    const kept = this.strategy.setPriceTypeAll(priceType);
+    if (kept > 0) this.showStatus(`${kept === 1 ? '1 BSE leg stays' : `${kept} BSE legs stay`} at a limit price: market orders are not available on BFO.`);
   }
 
   protected onSaveToBasket(): void {
@@ -783,10 +837,10 @@ export class OptionChainPageComponent {
   private legContract(meta: ChainMeta, row: ChainStrike, type: 'CE' | 'PE'): LegContract | null {
     const ref = type === 'CE' ? row.ce : row.pe;
     if (!ref) return null;
-    const ltp = this.store.legPrices().get(ref.token) ?? this.store.quotes().get(ref.token)?.().ltp ?? null;
+    const { ltp, bid, ask } = this.store.bookOf(ref.token);
     return {
       token: ref.token, tsym: ref.tsym, exch: splitFeedKey(ref.token).exch, expiryIso: meta.expiry.iso,
-      strike: row.strike, type, lotSize: ref.lotSize, tickSize: ref.tickSize, ltp,
+      strike: row.strike, type, lotSize: ref.lotSize, tickSize: ref.tickSize, ltp, bid, ask,
     };
   }
 

@@ -21,12 +21,15 @@ describe('column registry formatting', () => {
   });
 
   it("price columns use the contract's price precision (default 2); others ignore it", () => {
-    for (const id of ['bid', 'ask', 'ltp', 'ltpChg', 'open', 'high', 'low', 'straddle', 'straddleBid', 'straddleAsk']) {
+    for (const id of ['bid', 'ask', 'ltp', 'open', 'high', 'low', 'straddle', 'straddleBid', 'straddleAsk']) {
       expect(col(id).format(12.5, 4)).toBe('12.5000');
       expect(col(id).format(12.5)).toBe('12.50');
       expect(col(id).format(12.5, 0)).toBe('13');
     }
     expect(col('chg').format(1.5, 3)).toBe('+1.500');
+    expect(col('ltpChgPct').format(-12.4)).toBe('-12.40'); // its "(-3.20%)" part is the inline sub-column
+    expect(col('ltpChgPct')).toMatchObject({ label: 'LTP Chg (%)', sub: 'chgPctBr', subInline: true });
+    expect(col('chgPctBr').format(-3.2)).toBe('-3.20%');
     expect(col('strDecay').format(-1.5, 1)).toBe('-1.5');
     expect(col('ltp').format(12.5, Number.NaN)).toBe('12.50'); // bad pp falls back to 2
     expect(col('chgPct').format(1.5, 4)).toBe('+1.50');

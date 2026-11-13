@@ -5,7 +5,6 @@ import {
   AuthSessionService, LoginIdentityMismatchError,
 } from '../features/option-chain/data-access/auth-session.service';
 import { KambalaError } from '../features/option-chain/data-access/kambala/kambala.types';
-import { ThemeToggleComponent } from '../features/option-chain/ui/theme-toggle/theme-toggle.component';
 import { LOGIN_STYLES } from './login-page.component';
 import { safeReturnUrl } from './safe-return-url';
 
@@ -31,9 +30,8 @@ type State =
 @Component({
   selector: 'app-auth-callback',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, ThemeToggleComponent],
+  imports: [RouterLink],
   template: `
-    <oc-theme-toggle class="corner" />
     <main class="wrap">
       <section class="card" aria-labelledby="cb-title">
         @switch (state().kind) {

@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { FooterActionsComponent } from './footer-actions.component';
+import { FOOTER_HINT, FooterActionsComponent } from './footer-actions.component';
 
 describe('FooterActionsComponent', () => {
   let f: ComponentFixture<FooterActionsComponent>;
@@ -29,14 +29,35 @@ describe('FooterActionsComponent', () => {
     expect(sb).toHaveBeenCalledTimes(1);
   });
 
-  it('is off until a contract is ticked (as on TradeSmart)', () => {
+  it('is off until a contract is ticked: no "not allowed" cursor, a hint to select strikes instead, and clicks do nothing', () => {
     set('checkedCount', 0);
     f.detectChanges();
-    const btns = Array.from(el().querySelectorAll('button'));
-    expect(btns.every((x) => x.disabled)).toBe(true);
+    const btns = Array.from(el().querySelectorAll<HTMLButtonElement>('button'));
+    expect(btns).toHaveLength(3);
+    const hint = el().querySelector('.sr')!;
+    expect(hint.textContent!.trim()).toBe(FOOTER_HINT);
+    expect(FOOTER_HINT).toBe('Select strikes using the checkboxes first');
+    for (const b of btns) {
+      expect(b.disabled).toBe(false); // focusable and hoverable, so the hint can show
+      expect(b.getAttribute('aria-disabled')).toBe('true');
+      expect(b.getAttribute('data-hint')).toBe(FOOTER_HINT);
+      expect(b.getAttribute('aria-describedby')).toBe(hint.id);
+      expect(getComputedStyle(b).cursor).not.toBe('not-allowed');
+    }
+    const spies = [vi.fn(), vi.fn(), vi.fn()];
+    f.componentInstance.addToWatchlist.subscribe(spies[0]!);
+    f.componentInstance.addToBasket.subscribe(spies[1]!);
+    f.componentInstance.buildStrategy.subscribe(spies[2]!);
+    btns.forEach((b) => b.click());
+    spies.forEach((sp) => expect(sp).not.toHaveBeenCalled());
+
     set('checkedCount', 1);
     f.detectChanges();
-    expect(btns.every((x) => !x.disabled)).toBe(true);
+    for (const b of btns) {
+      expect(b.getAttribute('aria-disabled')).toBe('false');
+      expect(b.hasAttribute('data-hint')).toBe(false);
+      expect(b.hasAttribute('aria-describedby')).toBe(false);
+    }
   });
 
   it('shows only the three buttons (no Fwd / ATM / expiry summary)', () => {
@@ -60,6 +81,6 @@ describe('FooterActionsComponent', () => {
   it('Build your strategy is off with no legs', () => {
     set('checkedCount', 0);
     f.detectChanges();
-    expect(el().querySelector<HTMLButtonElement>('button.strategy')!.disabled).toBe(true);
+    expect(el().querySelector<HTMLButtonElement>('button.strategy')!.getAttribute('aria-disabled')).toBe('true');
   });
 });

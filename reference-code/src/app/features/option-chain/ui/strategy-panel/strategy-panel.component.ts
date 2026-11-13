@@ -5,7 +5,7 @@ import {
 import type { Expiry } from '../../data-access/models';
 import type { MarginState } from '../../strategy/strategy-margin.service';
 import {
-  BFO_MKT, isBfoMarket, isSendable, legQty, netPremium, resultText, roundToTick,
+  BFO_MKT, buysFirst, isBfoMarket, isOpenOrder, isRetryable, isSendable, legQty, netPremium, resultText, roundToTick,
 } from '../../strategy/strategy.models';
 import type { LegEdit, LegResult, Product, Strategy, StrategyLeg } from '../../strategy/strategy.models';
 import { formatExpiryDate } from '../expiry-strip/expiry-strip.component';
@@ -27,6 +27,45 @@ function contract(leg: StrategyLeg): string {
 }
 
 const PRODUCT_LABEL: Record<Product, string> = { I: 'Intraday', M: 'Normal' };
+
+function resultKey(id: string, r: LegResult): string {
+  return `${id}|${r.status}|${r.status === 'placed' ? r.orderNo : r.status === 'rejected' ? r.reason : ''}`;
+}
+
+export type SummaryTone = 'ok' | 'wait' | 'warn' | 'bad';
+
+/**
+ * The run in one line. Filled: placed and filled. Open: placed and not final (or its status not known yet). Failed:
+ * rejected, not sent, or cancelled (a partly filled then cancelled order counts as failed: the leg is incomplete).
+ */
+export function runSummary(legs: readonly StrategyLeg[]): { tone: SummaryTone; text: string } {
+  let filled = 0;
+  let open = 0;
+  let failed = 0;
+  let unknown = 0;
+  for (const l of legs) {
+    const r = l.result;
+    if (!r) continue;
+    if (r.status !== 'placed') failed++;
+    else if (!r.orderNo) unknown++;
+    else if (!r.order || r.order.phase === 'open' || r.order.phase === 'partial') open++;
+    else if (r.order.phase === 'filled') filled++;
+    else failed++;
+  }
+  const total = filled + open + failed + unknown;
+  const legsWord = (n: number): string => `${n} leg${n === 1 ? '' : 's'}`;
+  if (total === 0) return { tone: 'wait', text: '' };
+  if (failed === total) return { tone: 'bad', text: 'No order went through. Retry the failed legs or go back to edit them.' };
+  if (failed > 0) {
+    return {
+      tone: 'warn',
+      text: `Incomplete position: ${filled} of ${legsWord(total)} filled. Cancel the open orders or retry the failed legs.`,
+    };
+  }
+  if (open > 0) return { tone: 'wait', text: `Waiting for ${open} of ${total} order${total === 1 ? '' : 's'} to fill…` };
+  if (unknown > 0) return { tone: 'wait', text: 'Orders placed. Check the order book for fills.' };
+  return { tone: 'ok', text: `All ${legsWord(total)} filled.` };
+}
 
 /**
  * The "Build your strategy" pop-up: one editable row per leg, the margin / premium summary, the action row,
@@ -50,6 +89,8 @@ export class StrategyPanelComponent {
   readonly pickerFor = input<(leg: StrategyLeg) => { strikes: number[]; ready: boolean }>(() => ({ strikes: [], ready: false }));
   readonly marketOpen = input(false);
   readonly placing = input(false);
+  /** Cancel open orders is in progress. */
+  readonly cancelling = input(false);
 
   readonly edit = output<{ id: string; edit: LegEdit }>();
   readonly remove = output<string>();
@@ -58,21 +99,34 @@ export class StrategyPanelComponent {
   readonly lotMultiplier = output<number>();
   readonly product = output<Product>();
   readonly resetPrices = output<void>();
+  /** "All legs: Limit / Market". */
+  readonly priceTypeAll = output<'LMT' | 'MKT'>();
   readonly retryMargin = output<void>();
   readonly saveToBasket = output<void>();
   /** Emitted from the confirm step only. */
   readonly execute = output<void>();
   readonly collapse = output<void>();
+  /** Cancel every placed order that is still open or partly filled. */
+  readonly cancelOpen = output<void>();
+  /** Put the failed legs back into the strategy for another Execute all. */
+  readonly retryFailed = output<void>();
 
   protected readonly contract = contract;
   protected readonly formatExpiryDate = formatExpiryDate;
   protected readonly productLabel = PRODUCT_LABEL;
   protected readonly products: Product[] = ['I', 'M'];
 
-  private readonly results = computed(() => this.strategy().legs.flatMap((l) => (l.result ? [l.result] : [])));
+  /**
+   * One key per run result (leg, status, order no. or reason). Order tracking (Open → Filled) keeps the key, so a
+   * status update never pulls the user back to the results view.
+   */
+  private readonly results = computed(
+    () => this.strategy().legs.flatMap((l) => (l.result ? [resultKey(l.id, l.result)] : [])),
+    { equal: (a, b) => a.length === b.length && a.every((x, i) => x === b[i]) },
+  );
 
   /** Switches to 'results' whenever a result appears that wasn't there before; otherwise keeps the user's view. */
-  protected readonly view = linkedSignal<readonly LegResult[], PanelView>({
+  protected readonly view = linkedSignal<readonly string[], PanelView>({
     source: this.results,
     computation: (now, prev) => {
       const seen = prev?.source ?? [];
@@ -89,10 +143,41 @@ export class StrategyPanelComponent {
   /** Orders are (about to be) in flight: every edit and Back is off. */
   protected readonly busy = computed(() => this.placing() || this.requested());
 
-  protected readonly legs = computed(() => this.strategy().legs);
-  /** The legs Execute all sends: included and not already placed. */
-  protected readonly included = computed(() => this.legs().filter(isSendable));
+  /**
+   * Row order: buys first, then sells, worked out when the pop-up opens or a leg is added or removed. A row never
+   * moves while it is edited (flipping B ↔ S keeps it in place), so nothing jumps without the user seeing why.
+   */
+  private readonly rowOrder = linkedSignal<string, string[]>({
+    source: () => this.strategy().legs.map((l) => l.id).sort().join('|'),
+    computation: (_ids, prev) => {
+      const legs = this.strategy().legs;
+      const same = prev && prev.value.length === legs.length && legs.every((l) => prev.value.includes(l.id));
+      return same ? prev.value : untracked(() => buysFirst(legs).map((l) => l.id));
+    },
+  });
+  protected readonly legs = computed(() => {
+    const byId = new Map(this.strategy().legs.map((l) => [l.id, l]));
+    return this.rowOrder().flatMap((id) => byId.get(id) ?? []);
+  });
+  /** The order type every leg has, or null when they differ. */
+  protected readonly allType = computed(() => {
+    const types = new Set(this.legs().map((l) => l.priceType));
+    return types.size === 1 ? [...types][0]! : null;
+  });
+  /** The legs Execute all sends, in the order it sends them: buys first (margin benefit), then sells. */
+  protected readonly included = computed(() => buysFirst(this.legs().filter(isSendable)));
+  /** Buys and sells are both being sent: the note under the table says buys go first. */
+  protected readonly mixedSides = computed(() => {
+    const inc = this.legs().filter(isSendable);
+    return inc.some((l) => l.side === 'B') && inc.some((l) => l.side === 'S');
+  });
   protected readonly withResult = computed(() => this.legs().filter((l) => l.result));
+  /** Placed orders still open or partly filled (Cancel open orders). */
+  protected readonly openCount = computed(() => this.legs().filter(isOpenOrder).length);
+  /** Legs Retry failed legs would put back. */
+  protected readonly retryCount = computed(() => this.legs().filter(isRetryable).length);
+  /** The run in one line: all filled, waiting, incomplete position, or nothing went through. */
+  protected readonly summary = computed(() => runSummary(this.withResult()));
   /** An included limit leg has no price yet (e.g. just moved to another expiry, before its first tick). */
   protected readonly waitingForPrice = computed(() => this.included().some((l) => l.priceType === 'LMT' && l.price <= 0));
   /** A market leg on BFO can't be sent (BFO_MKT says why). */
@@ -133,10 +218,46 @@ export class StrategyPanelComponent {
 
   protected resultLine(r: LegResult): { label: string; cls: string; detail: string | null } {
     switch (r.status) {
-      case 'placed': return { label: 'Placed', cls: 'ok', detail: r.orderNo ? `#${r.orderNo}` : 'order no. unavailable' };
+      case 'placed': {
+        const no = r.orderNo ? `#${r.orderNo}` : 'order no. unavailable';
+        const o = r.order;
+        if (!o || !r.orderNo) return { label: 'Placed', cls: 'ok', detail: no };
+        const at = o.avgPrice !== null ? ` @ ₹${o.avgPrice.toFixed(2)}` : '';
+        switch (o.phase) {
+          case 'filled': return { label: 'Filled', cls: 'ok', detail: `${o.filledQty}${at} · ${no}` };
+          case 'open': return { label: 'Open', cls: 'wait', detail: `waiting to fill · ${no}` };
+          case 'partial': return { label: 'Partly filled', cls: 'wait', detail: `${o.filledQty}/${o.qty}${at} · ${no}` };
+          case 'rejected': return { label: 'Rejected', cls: 'bad', detail: o.reason ?? null };
+          default:
+            return o.filledQty > 0
+              ? { label: 'Partly filled', cls: 'bad', detail: `${o.filledQty}/${o.qty}${at}, rest cancelled · ${no}` }
+              : { label: 'Cancelled', cls: 'bad', detail: no };
+        }
+      }
       case 'rejected': return { label: 'Rejected', cls: 'bad', detail: r.reason };
       default: return { label: 'Not sent', cls: 'skip mu', detail: null };
     }
+  }
+
+  /** Confirm-step badge: "LIMIT ₹152.30" or "MARKET". */
+  protected orderTypeText(leg: StrategyLeg): string {
+    return leg.priceType === 'MKT' ? 'MARKET' : `LIMIT ₹${leg.price.toFixed(2)}`;
+  }
+
+  protected setType(leg: StrategyLeg, priceType: 'LMT' | 'MKT'): void {
+    if (leg.priceType !== priceType) this.editLeg(leg, { priceType });
+  }
+
+  protected setTypeAll(priceType: 'LMT' | 'MKT'): void {
+    if (this.busy()) return;
+    this.view.set('edit');
+    this.priceTypeAll.emit(priceType);
+  }
+
+  protected retry(): void {
+    if (this.busy()) return;
+    this.view.set('edit');
+    this.retryFailed.emit();
   }
 
   protected plural(n: number, word: string): string {

@@ -16,7 +16,7 @@ describe('StatusBannerComponent', () => {
 
   it.each([
     ['reconnecting', 'Reconnecting to live prices… Showing the last values received.', 'status'],
-    ['closed', 'Market closed · Showing prices as of 15:30.', 'status'],
+    ['closed', 'Market closed.', 'status'],
     ['error', 'Could not load the option chain for NIFTY. Check your connection and try again.', 'alert'],
     ['analytics-unavailable', 'Analytics unavailable. Prices are still live.', 'status'],
   ])('%s copy and role', (kind, copy, role) => {

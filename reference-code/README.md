@@ -100,6 +100,8 @@ src/
       index.ts             Public API: OPTION_CHAIN_ROUTES, openOptionChain, optionChainUrl.
       analytics/           AnalyticsBridge (main thread <-> Web Worker) and the worker that runs analyze().
       columns/             Column registry (every column's label, value, format) and the eight presets.
+      strategy/            Build your strategy: StrategyStore (legs), margin service, executeStrategy (placing),
+                           OrderTracker (follows each placed order until filled / rejected / cancelled).
       data-access/         Store, facade, market session (exchange hours), instruments service,
                            prefs store and shared models. AuthSessionService (tab-scoped login session),
                            QuickUnderlyingsService (NIFTY / SENSEX tokens from GetIndexList).
@@ -115,9 +117,10 @@ src/
         chain-table/         The table, spot line, OI bars, price-flash directive.
         column-chooser/      Custom view editor.
         expiry-strip/        Expiry buttons.
-        footer-actions/      Add to Watchlist / Basket, checked count, footer stats.
-        theme-toggle/        Sun / moon icon button (hidden when the host controls the theme).
-        status-banner/       Reconnecting, market closed, error, analytics unavailable.
+        footer-actions/      Add to Watchlist / Basket / Build your strategy with the ticked count; while nothing is
+                             ticked they show "Select strikes using the checkboxes first" on hover.
+        strategy-panel/      The Build your strategy pop-up (legs, Limit | Market, confirm, order results).
+        status-banner/       Reconnecting, error (market closed is the red feed dot, not a banner).
         underlying-bar/      Search box, NIFTY/SENSEX quick buttons, spot, OHLC, lot size.
         view-toolbar/        View chips, strike count, Edit columns, CSV.
       view/                Pure view-model builder and the spot-slot (hysteresis) function.
@@ -139,14 +142,14 @@ Every `// INTEGRATION:` comment in `src`, generated from `grep -rn "INTEGRATION:
 | 1 | `src/app/app.config.ts:10` | Host the `option-chain` route inside TradeSmart's existing Ionic shell. Ionic is not wired in this app. |
 | 2 | `src/app/app.config.ts:17` | Standalone login wiring (`provideStandaloneKambalaSession()`: REST via the dev proxy at `/kambala-api`, session from `AuthSessionService`). Inside TradeSmart's app, provide `KAMBALA_REST_BASE` and `NOREN_SESSION_CONFIG` from its own config and auth service instead. |
 | 3 | `src/app/app.routes.ts:10` | The standalone `/login` and `/auth/callback` routes (TradeSmart v2 OAuth via the dev proxy). TradeSmart's existing login replaces them. |
-| 4 | `src/app/core/theme.service.ts:34` | Theme: inside TradeSmart's app the host sets `body[color-theme]` (`light` or `dark`). `ThemeService` adopts it (also when it is set after startup), follows later changes, never writes it, and the toggle button hides itself. **TradeSmart's host index.html must not include the boot script from this app's index.html; the host sets body[color-theme] itself.** See Themes. |
+| 4 | `src/app/core/theme.service.ts` | Theme: there is no theme switch on the page; it uses the client's TradeSmart platform theme. Inside TradeSmart's app the host sets `body[color-theme]` (`light` or `dark`); `ThemeService` adopts it and follows changes. **When TradeSmart opens the chain in its own tab, add `?theme=light` or `?theme=dark` (the client's platform theme) to the URL.** TradeSmart's host index.html must not include the boot script from this app's index.html. See Themes. |
 | 5 | `src/app/features/option-chain/data-access/chain-feed.facade.ts:349` | Session expiry: when `store.sessionExpired()` is true the shell runs re-login. **After re-login, refresh the session config (the `NOREN_SESSION_CONFIG` getter) and call `ChainFeedFacade.reconnect()`**; it reconnects the socket and reloads the current underlying and expiry. |
 | 6 | `src/app/features/option-chain/data-access/feed/noren-socket.service.ts:53` | Provide the Noren session config (WS URL, uid, actid, optional `source`, and **`accessToken`** or **`susertoken`**) as a getter; it is read on every connect, so a token refreshed by re-login is used on reconnect. **Its shape picks the connect message:** `accessToken` → v2 `{t:'a', uid, actid, source:'API', accesstoken}`, ack `ak`; `susertoken` only → legacy `{t:'c', …, susertoken}`, ack `ck` (TradeSmart's web session may still use this). |
 | 7 | `src/app/features/option-chain/data-access/feed/noren-socket.service.ts:65` | Map Kambala's subscription-limit error to the "Partial chain" state once the real error shape is known. |
 | 8 | `src/app/features/option-chain/data-access/kambala/kambala-rest.client.ts:15` | `KAMBALA_REST_BASE`: the REST base as a **full path** (e.g. `https://host/NorenWClientAPIv2`). Calls go to `${base}/${endpoint}`; there is no `NorenWClientTP` prefix any more. |
 | 9 | `src/app/features/option-chain/data-access/kambala/kambala-rest.client.ts:43` | Provide the uid and token from the app's auth service (read from the session getter on every call): `accessToken` → `Authorization: Bearer` header and no `jKey` (v2); `susertoken` only → `jKey` (legacy). `uid` always goes in `jData`. |
 | 10 | `src/app/features/option-chain/data-access/kambala/kambala.types.ts:117` | `NOREN_SESSION_CONFIG` token: a getter `() => NorenSessionConfig` from TradeSmart's auth/session service, with `accessToken` (v2 OAuth) or only `susertoken` (legacy Noren web session); see `NorenSessionConfig`. **After re-login, refresh it and call `reconnect()`.** |
-| 11 | `src/app/features/option-chain/data-access/market-session.service.ts:26` | Exchange holiday calendar and special sessions (Muhurat, Saturday sessions) for `MARKET_SESSION_RULE`. The default knows only 09:15–15:30 IST, Monday to Friday, so a holiday shows as open until this is plugged in. |
+| 11 | `src/app/features/option-chain/data-access/market-session.service.ts` | Exchange holiday calendar and special sessions (Muhurat, Saturday sessions) for `MARKET_SESSION_RULE(nowMs, exch)`, or Kambala's ExchStatus / WS `ms` messages. The default knows only normal hours, Monday to Friday: NFO / BFO 09:15–15:40 IST (closing auction session), MCX 09:00–23:30 (23:55 during US daylight saving time). A holiday shows as open until this is plugged in. The feed dot is green only while the selected underlying's market is open. |
 | 12 | `src/app/features/option-chain/data-access/models.ts:52` | Confirm the BFO option-chain lookup for SENSEX (TradeSmart's existing SENSEX chain). With live data the SENSEX index token comes from `GetIndexList('BSE')`; `'1'` is only the fallback placeholder. |
 | 13 | `src/app/features/option-chain/feature-shell/open-option-chain.ts:10` | Call `openOptionChain()` from the existing entry points: chart "Option Chain" button, watchlist, scrip menu. |
 | 14 | `src/app/features/option-chain/feature-shell/option-chain-page.component.ts:101` | Filter search results to F&O underlyings once Kambala says how (open question 8). |
@@ -161,7 +164,12 @@ Every `// INTEGRATION:` comment in `src`, generated from `grep -rn "INTEGRATION:
 
 ## Build your strategy
 
-The chain's tick boxes are the legs of a strategy (up to 10 per underlying, kept per user in `sessionStorage`, so they end with the tab). The footer's **Build your strategy** button opens a pop-up above it: edit side, expiry, strike, type, lots, price or market order per leg; see the margin and hedge benefit (`GetBasketMargin`, 400 ms after the last change) and the net premium; then **Execute all** (one `PlaceOrder` per leg, buys first, stopping at the first rejection; off while the market is closed) or **Save to basket**. Code: `strategy/` (store, margin service, `executeStrategy`), `ui/strategy-panel/`, wired in `feature-shell/option-chain-page.component.ts`. In mock mode (`?feed=mock`) margin and orders come from the mock REST client (order numbers `MOCK000001`…) and Save to basket only shows a status line; no real Kambala endpoint is called.
+The chain's tick boxes are the legs of a strategy (up to 10 per underlying, kept per user in `sessionStorage`, so they end with the tab). The footer's **Build your strategy** button opens a pop-up above it: edit side, expiry, strike, type, lots, price or market order per leg; see the margin and hedge benefit (`GetBasketMargin`, 400 ms after the last change) and the net premium; then **Execute all** (one `PlaceOrder` per leg, buys first, stopping at the first rejection; off while the market is closed) or **Save to basket**.
+
+- **Legs are listed buys first**, then sells, the order they are sent in.
+- **Order type:** Limit is the default. Each leg has a **Limit | Market** switch and the header has **All legs: Limit / Market**. A market leg shows "At market" instead of a price. BSE (BFO) legs can't be market orders (S5). A new leg's limit price is the best **ask** for a buy (the best **bid** for a sell, on ↻ Reset prices), else the LTP. The confirm step shows **BUY / SELL** and a **LIMIT ₹x** or **MARKET** badge per leg.
+- **After placing:** "Placed" only means Kambala accepted the order. `OrderTracker` follows each order (SingleOrdHist every 2 s for a minute, then every 10 s, plus WS `om` order updates) until it is final, and each leg shows **Open**, **Partly filled x/y**, **Filled (qty @ avg price)**, **Rejected (reason)** or **Cancelled**. A summary line says "All N legs filled", "Waiting for N orders to fill…", "Incomplete position: X of N legs filled…" or "No order went through…".
+- **When a leg fails:** nothing is cancelled or squared off automatically. **Cancel open orders** cancels every order still open or partly filled (CancelOrder). **Retry failed legs** puts rejected, not-sent and cancelled-unfilled legs back into the strategy for another Execute all; filled and partly filled legs are never re-sent. Code: `strategy/` (store, margin service, `executeStrategy`), `ui/strategy-panel/`, wired in `feature-shell/option-chain-page.component.ts`. In mock mode (`?feed=mock`) margin and orders come from the mock REST client (order numbers `MOCK000001`…) and Save to basket only shows a status line; no real Kambala endpoint is called.
 
 Integration points (re-run `grep -rn "INTEGRATION:" src` for current line numbers):
 
@@ -172,15 +180,15 @@ Integration points (re-run `grep -rn "INTEGRATION:" src` for current line number
 | S3 | `feature-shell/option-chain-page.component.ts:669`, `onSaveToBasket` | **`BasketService.add(items)`**: one `BasketLegPayload` per included leg, `{ exch, token, tsym, side, qty, price, priceType, product }`. `token` is Kambala's raw token (e.g. `43651`, not the feed key `NFO\|43651`); `qty` = lots × lot multiplier × lot size; `price` is 0 for a market order; `product` is `I` (Intraday) or `M` (Normal). TradeSmart lets the user pick the basket. |
 | S4 | Product toggle (`Strategy.product`) | **Check the account's `prarr` (UserDetails, enabled products) allows `I` for NFO / BFO** before offering Intraday; hide or disable it otherwise. The pop-up offers `I` and `M` without checking. |
 | S5 | MKT button (`ui/strategy-panel`) | **BFO market orders need `mkt_protection`** (Kambala: MKT on BSE/BFO requires a protection percent). Until a value is agreed, the MKT button is hidden for BFO legs (SENSEX), so BFO legs are always limit orders; the panel also blocks Execute all and `executeStrategy` never sends a BFO MKT leg (`BFO_MKT` in `strategy/strategy.models.ts`). |
+| S7 | `kambala-rest.client.ts`, `orderStatus` / `cancelOrder` | **Confirm the `SingleOrdHist` and `CancelOrder` paths on TradeSmart's v2 base**, and that TradeSmart's socket delivers `t: "om"` order updates (polling covers it if not). |
 | S6 | `executeStrategy` | **Freeze-quantity rejections are not split.** A leg above the exchange's freeze quantity is rejected by Kambala and shown as rejected (later legs are not sent); there is no automatic order slicing. |
 
 ## Themes
 
 The app has a light and a dark theme, using TradeSmart's own palettes (`src/styles/_tradesmart-tokens.scss`: light is `:root`, dark is `body[color-theme='dark']`). Components use only the `--ts-*` tokens, so a new surface needs no theme code.
 
-- **Toggle:** the sun / moon button in the page header (top right on the login pages). The choice is stored in `localStorage` under `ts.theme`.
-- **Follows the system:** until the user picks a theme, the app follows `prefers-color-scheme`, live. After a pick it stays put. A small inline script in `index.html` applies the theme before Angular starts, so dark mode does not flash light (a CSP needs a `script-src` hash for it, or move it to a file).
-- **Host-controlled (INTEGRATION row 4):** inside TradeSmart's app the host already switches `body[color-theme]`. If that attribute is set before `ThemeService` starts, or later to a value the service did not write, the service adopts it, keeps following changes (MutationObserver), never writes it, stops following the system and storage, and the toggle is hidden. TradeSmart's host index.html must not include this app's boot script; the host sets body[color-theme] itself. Screenshots: `../docs/design/screenshots/option-chain-light.png` and `option-chain-dark.png` (`SCREENSHOTS=1 npx playwright test e2e/screenshots.spec.ts`).
+- **No theme switch:** the page uses the theme the client chose on TradeSmart's web platform.
+- **Order:** the host's `body[color-theme]` (inside TradeSmart's app; followed live, never written), else `?theme=light|dark` on the URL (TradeSmart passes the platform theme when it opens the chain in its own tab), else **light** (the default; the computer's dark-mode setting is not used). A small inline script in `index.html` applies the theme before Angular starts, so dark mode does not flash light (a CSP needs a `script-src` hash for it, or move it to a file). TradeSmart's host index.html must not include this app's boot script. Screenshots: `../docs/design/screenshots/option-chain-light.png` and `option-chain-dark.png` (`SCREENSHOTS=1 npx playwright test e2e/screenshots.spec.ts`).
 
 ## Configuration
 
@@ -198,7 +206,7 @@ The app has a light and a dark theme, using TradeSmart's own palettes (`src/styl
 | `forwardStrikesEachSide` | `3` | Strikes each side of the money used to estimate the forward. |
 | `spotSlotHysteresis` | `0.1` | The spot line keeps its gap until spot moves this fraction of a strike step past a neighbouring strike. |
 
-Market session: `MarketSessionService` (`data-access/market-session.service.ts`) decides open or closed from the injected clock: NSE/BSE F&O hours 09:15–15:30 IST, Monday to Friday, with a fixed +05:30 (never the machine time zone), re-evaluated every 30 s. It drives the "Market closed" banner, the one-analysis-while-closed rule and stale dimming (none while closed). The reconnecting banner still follows the feed. In mock mode the session is always open (the simulated market trades around the clock). Holidays are an INTEGRATION item.
+Market session: `MarketSessionService` (`data-access/market-session.service.ts`) decides open or closed from the injected clock: the selected underlying's options exchange (NFO / BFO 09:15–15:40 IST, MCX 09:00–23:30 or 23:55 in US daylight saving time), Monday to Friday, with a fixed +05:30 (never the machine time zone), re-evaluated every 30 s. It drives the feed dot (green only while that market is open, red "Market closed" otherwise; no closing time is shown), Execute all, the one-analysis-while-closed rule and stale dimming (none while closed). The reconnecting banner still follows the feed. In mock mode the session is always open (the simulated market trades around the clock). Holidays are an INTEGRATION item.
 
 Number formats: prices use each contract's price precision (`pp`, default 2) on screen and in the CSV. OI, Volume, OI Chg and Cum OI show lakhs, with the exact value (en-IN grouped) as a tooltip. GEX headers and cells explain the sign convention in a tooltip. Signed values that round to zero show as `0.00`. The CSV starts with a UTF-8 byte-order mark for Excel.
 
@@ -230,7 +238,7 @@ Build-time flag: `environment.allowMockFeed` (`src/environments/environment.ts` 
 - **SENSEX / BANKEX token and BFO lookup.** The BSE index tokens and the BFO option-chain call are undocumented; the real-feed path for BSE needs confirming (INTEGRATION 12). The mock market covers SENSEX with its odd lot size for the 91-day expiry.
 - **OI in lots or quantity.** Kambala has not confirmed the unit. `oiUnit` defaults to `'qty'`; flip it in config once known (it is normalised to quantity at ingestion).
 - **Number format K/M/B ('intl') not implemented; lakhs only.** The `numberFormat` preference is kept in the saved prefs for forward compatibility.
-- **Market holidays.** The market session knows weekdays and 09:15–15:30 IST only; exchange holidays and special sessions show as open until a calendar is plugged in (INTEGRATION 11).
+- **Market holidays.** The market session knows weekdays and normal hours only (NFO / BFO 09:15–15:40, MCX 09:00–23:30/23:55); exchange holidays and special sessions show as open until a calendar is plugged in (INTEGRATION 11).
 - **No retry backoff.** A failed load shows an error banner with Retry; there is no automatic backoff. Session expiry goes to the re-login hook with no retry loop; after re-login the shell (or the Retry button) calls `reconnect()`.
 - **The price flash is a held tint, not a fade.** A fading `background-color` repaints every flashing cell every frame, which broke the frame budget (36 to 44 % long frames). The tint is held for at least 400 ms and cleared on the next tick flush (about 500 ms in practice), and is skipped under `prefers-reduced-motion`. The standalone prototype uses a simpler version: its tint clears 400 ms after each render, while the Angular app holds it at least 400 ms and clears it on the next flush.
 - **The strike window is centred on the spot slot, not the ATM.** This keeps the spot line mid-table. On a far expiry the ATM row can fall outside a small window; ATM is shown in the header and footer.

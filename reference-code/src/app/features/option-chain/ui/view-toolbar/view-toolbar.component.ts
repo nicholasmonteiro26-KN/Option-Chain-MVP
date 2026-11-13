@@ -63,7 +63,7 @@ export class ViewToolbarComponent {
   readonly presetId = input.required<PresetId | string>();
   readonly customEditorOpen = input(false);
   readonly strikeCount = input<StrikeCount>(16);
-  /** A short status shown beside the Strikes picker, e.g. "Market closed · Prices as of 15:30". */
+  /** A short status shown beside the Strikes picker, e.g. "Analytics unavailable · Prices are live". */
   readonly notice = input<string | null>(null);
 
   readonly presetChange = output<PresetId>();

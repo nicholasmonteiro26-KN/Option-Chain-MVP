@@ -1,6 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
-import { ThemeToggleComponent } from '../features/option-chain/ui/theme-toggle/theme-toggle.component';
 import { AuthSessionService } from '../features/option-chain/data-access/auth-session.service';
 import { safeReturnUrl } from './safe-return-url';
 
@@ -23,7 +22,6 @@ export const LOGIN_STYLES = `
     border: 1px solid var(--ts-input-border); border-radius: 4px; background: var(--ts-input-bg); color: var(--ts-input-fg);
   }
   input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; }
-  .corner { position: fixed; top: 12px; right: 12px; z-index: 5; }
   input[aria-invalid='true'] { border-color: var(--ts-red); }
   .hint { margin: 0; font-size: 12px; color: var(--ts-muted); }
   .ferr { margin: 0; font-size: 12px; color: var(--ts-red); }
@@ -51,11 +49,9 @@ export const LOGIN_STYLES = `
 @Component({
   selector: 'app-login-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ThemeToggleComponent],
   // Back from TradeSmart's page (bfcache restore): the button must not stay disabled.
   host: { '(window:pageshow)': 'pending.set(false)' },
   template: `
-    <oc-theme-toggle class="corner" />
     <main class="wrap">
       <form class="card" novalidate aria-labelledby="login-title" (submit)="submit($event)">
         <h1 id="login-title">Log in</h1>

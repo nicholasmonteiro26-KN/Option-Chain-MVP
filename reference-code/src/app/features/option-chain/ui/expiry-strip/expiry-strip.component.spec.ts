@@ -121,6 +121,26 @@ describe('ExpiryStripComponent', () => {
     expect(dot.getAttribute('aria-label')).toContain(label);
   });
 
+  it('the dot is red "Market closed" when that market is shut, even with the feed open; session expiry and reconnecting keep their colours', () => {
+    set('marketOpen', false);
+    f.detectChanges();
+    const dot = (): Element => el().querySelector('.dot')!;
+    expect(dot().classList.contains('err')).toBe(true);
+    expect(dot().getAttribute('aria-label')).toBe('Market closed');
+    expect(dot().getAttribute('title')).toBe('Market closed');
+    set('feedStatus', 'reconnecting');
+    f.detectChanges();
+    expect(dot().getAttribute('aria-label')).toContain('Reconnecting');
+    set('feedStatus', 'session-expired');
+    f.detectChanges();
+    expect(dot().getAttribute('aria-label')).toContain('Session expired');
+    set('feedStatus', 'open');
+    set('marketOpen', true);
+    f.detectChanges();
+    expect(dot().className.trim()).toBe('dot');
+    expect(dot().getAttribute('aria-label')).toContain('Live');
+  });
+
   it('shows the Partial chain badge only when partial', () => {
     expect(el().querySelector('.badge')).toBeNull();
     set('partial', true);

@@ -43,7 +43,7 @@ export const MORE_MENU: readonly MenuItem[] = [
 
 const DASH = '–';
 const SKELETON_ROWS = 10;
-const SIGNED = new Set(['chg', 'chgPct', 'oiChg', 'oiChgPct', 'strDecay', 'gexOiCr', 'gexVolCr']);
+const SIGNED = new Set(['chg', 'chgPct', 'ltpChgPct', 'oiChg', 'oiChgPct', 'strDecay', 'gexOiCr', 'gexVolCr']);
 const SENSE_CLASS: Record<string, string> = {
   LONG_BUILD_UP: 's-lb', SHORT_BUILD_UP: 's-sb', SHORT_COVERING: 's-sc', LONG_UNWINDING: 's-lu',
 };
@@ -65,7 +65,7 @@ interface CellVM {
   cls: string;
   /** CSS background-size for an OI bar, or null. */
   bar: string | null;
-  sub: { text: string; cls: string } | null;
+  sub: { text: string; cls: string; inline: boolean } | null;
   title: string | null;
   /** Numeric value watched by ocFlash, for flash columns only. */
   flash: number | null;
@@ -241,7 +241,7 @@ export class ChainTableComponent {
       const sc = COLUMNS[col.sub];
       if (sc) {
         const sv = sc.value(row, side);
-        sub = { text: sv === null ? DASH : sc.format(sv, pp), cls: signClass(sv) };
+        sub = { text: sv === null ? DASH : sc.format(sv, pp), cls: signClass(sv), inline: !!col.subInline };
       }
     }
     const ltp = leg?.quote?.ltp ?? null;

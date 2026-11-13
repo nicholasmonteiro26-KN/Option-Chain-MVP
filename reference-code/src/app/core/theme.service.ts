@@ -3,57 +3,45 @@ import { DestroyRef, inject, Injectable, InjectionToken, signal } from '@angular
 
 export type Theme = 'light' | 'dark';
 
-export const THEME_STORAGE_KEY = 'ts.theme';
-const DARK_QUERY = '(prefers-color-scheme: dark)';
-
-/** Where the explicit choice is kept (null: no usable storage). Replaced in tests. */
-export const THEME_STORAGE = new InjectionToken<Pick<Storage, 'getItem' | 'setItem'> | null>('THEME_STORAGE', {
+/** The `theme` query parameter of the page URL (raw; validated by the service). Replaced in tests. */
+export const THEME_URL_PARAM = new InjectionToken<string | null>('THEME_URL_PARAM', {
   providedIn: 'root',
   factory: () => {
     try {
-      return typeof localStorage === 'undefined' ? null : localStorage;
+      return typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('theme');
     } catch {
-      return null; // storage blocked by the browser
+      return null;
     }
   },
-});
-
-/** matchMedia, injected so tests can drive the system setting. */
-export const THEME_MATCH_MEDIA = new InjectionToken<((query: string) => MediaQueryList) | null>('THEME_MATCH_MEDIA', {
-  providedIn: 'root',
-  factory: () => (typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    ? (q: string) => window.matchMedia(q)
-    : null),
 });
 
 const asTheme = (v: unknown): Theme | null => (v === 'light' || v === 'dark' ? v : null);
 
 /**
- * Light / dark theme. TradeSmart's own switch is the `color-theme` attribute on `<body>`, so that is what this sets.
+ * Light / dark theme. The page has no theme switch: it uses the theme the client chose on TradeSmart's web platform.
+ * TradeSmart's own switch is the `color-theme` attribute on `<body>`, so that is what this reads and sets.
  *
- * INTEGRATION: inside TradeSmart's app the host sets body[color-theme]; this service follows it
- *
- * Standalone, the order is: stored choice (`ts.theme`), else the system setting. The system setting is followed live
- * until the user makes an explicit choice with `set` / `toggle`.
+ * Order:
+ * 1. Host: inside TradeSmart's app the host sets body[color-theme]; it is followed (live), never written.
+ * 2. `?theme=light|dark` on the URL. INTEGRATION: TradeSmart adds the client's platform theme when it opens the chain
+ *    in its own tab, e.g. `/option-chain?theme=dark`.
+ * 3. Light (the default; the computer's light / dark setting is not used).
  */
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
   private readonly doc = inject(DOCUMENT);
-  private readonly storage = inject(THEME_STORAGE);
-  private readonly matchMedia = inject(THEME_MATCH_MEDIA);
+  private readonly urlTheme = asTheme(inject(THEME_URL_PARAM));
 
   private readonly host = signal(false);
   /**
    * True when a host app controls body[color-theme]: it was set before this service started, or it changed to a value
-   * this service did not write. Then it is followed, never written, and the toggle hides itself.
+   * this service did not write. Then it is followed, never written.
    */
   get hostControlled(): boolean { return this.host(); }
   private readonly current = signal<Theme>('light');
   readonly theme = this.current.asReadonly();
-  private explicit = false;
   /** The last value this service wrote to body[color-theme]. */
   private lastWritten: Theme | null = null;
-  private stopSystem: (() => void) | null = null;
 
   constructor() {
     const body = this.doc.body;
@@ -65,18 +53,7 @@ export class ThemeService {
     if (preset !== null && !bootMarked) {
       this.adoptHost(preset);
     } else {
-      const stored = this.readStored();
-      const mql = this.matchMedia ? this.matchMedia(DARK_QUERY) : null;
-      this.explicit = stored !== null;
-      this.apply(stored ?? (mql?.matches ? 'dark' : 'light'));
-      if (mql) {
-        const onChange = (e: { matches: boolean }): void => {
-          if (!this.explicit) this.apply(e.matches ? 'dark' : 'light');
-        };
-        mql.addEventListener('change', onChange);
-        this.stopSystem = () => mql.removeEventListener('change', onChange);
-        destroy.onDestroy(() => this.stopSystem?.());
-      }
+      this.apply(this.urlTheme ?? 'light');
     }
 
     const View = this.doc.defaultView;
@@ -97,37 +74,12 @@ export class ThemeService {
 
   private adoptHost(t: Theme): void {
     this.host.set(true);
-    this.stopSystem?.();
-    this.stopSystem = null;
     this.current.set(t);
     this.doc.documentElement.style.colorScheme = t;
   }
 
-  /** An explicit choice: stored, and the system setting is no longer followed. No-op when the host controls the theme. */
-  set(t: Theme): void {
-    if (this.hostControlled) return;
-    this.explicit = true;
-    try {
-      this.storage?.setItem(THEME_STORAGE_KEY, t);
-    } catch {
-      // storage full or blocked: the choice still applies for this page
-    }
-    this.apply(t);
-  }
-
-  toggle(): void {
-    this.set(this.current() === 'dark' ? 'light' : 'dark');
-  }
-
-  private readStored(): Theme | null {
-    try {
-      return asTheme(this.storage?.getItem(THEME_STORAGE_KEY));
-    } catch {
-      return null;
-    }
-  }
-
   private apply(t: Theme): void {
+    if (this.host()) return;
     this.current.set(t);
     this.lastWritten = t;
     this.doc.body?.setAttribute('color-theme', t);

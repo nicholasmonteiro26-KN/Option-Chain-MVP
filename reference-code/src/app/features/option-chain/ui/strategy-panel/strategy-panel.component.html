@@ -2,6 +2,14 @@
   <header class="head">
     <h2 id="sp-title">Your strategy · {{ sym() }}</h2>
     <span class="count mu">{{ plural(legs().length, 'leg') }}</span>
+    @if (view() === 'edit') {
+      <!-- One order type for every leg; shows neither pressed when the legs differ. -->
+      <span class="mu all-lbl" id="sp-all">All legs</span>
+      <span class="seg" role="group" aria-labelledby="sp-all">
+        <button type="button" [attr.aria-pressed]="allType() === 'LMT'" [disabled]="busy()" (click)="setTypeAll('LMT')">Limit</button>
+        <button type="button" [attr.aria-pressed]="allType() === 'MKT'" [disabled]="busy()" (click)="setTypeAll('MKT')">Market</button>
+      </span>
+    }
     <button type="button" class="mu push" aria-label="Collapse strategy" title="Collapse" (click)="collapse.emit()">
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" /></svg>
     </button>
@@ -21,6 +29,7 @@
               <th>Strike</th>
               <th>Type</th>
               <th>Lots</th>
+              <th>Order type</th>
               <th>
                 Price
                 <button type="button" aria-label="Reset prices to live" title="Reset prices to live" (click)="reset()">↻</button>
@@ -37,7 +46,7 @@
               @let name = contract(leg);
               @let picker = pickerFor()(leg);
               @let live = liveOf(leg);
-              <tr [class.off]="!leg.included">
+              <tr [class.off]="!leg.included" [attr.data-leg]="leg.id">
                 <td>
                   <input type="checkbox" [checked]="leg.included" [attr.aria-label]="'Include ' + name" (change)="editLeg(leg, { included: !leg.included })" />
                 </td>
@@ -74,11 +83,19 @@
                   </span>
                 </td>
                 <td>
-                  <input class="bx px" type="number" min="0" step="0.05" inputmode="decimal" [attr.aria-label]="'Limit price, ' + name"
-                    [value]="leg.price.toFixed(2)" [disabled]="leg.priceType === 'MKT'" (change)="setPrice(leg, $event)" />
-                  @if (leg.exch !== 'BFO') {
-                    <button type="button" class="bx mkt" [attr.aria-pressed]="leg.priceType === 'MKT'" [attr.aria-label]="'Market order, ' + name"
-                      title="Market order" (click)="editLeg(leg, { priceType: leg.priceType === 'MKT' ? 'LMT' : 'MKT' })">MKT</button>
+                  <span class="seg" role="group" [attr.aria-label]="'Order type, ' + name">
+                    <button type="button" [attr.aria-pressed]="leg.priceType === 'LMT'" (click)="setType(leg, 'LMT')">Limit</button>
+                    <!-- BSE (BFO) market orders are not available: Market is off there, with the reason on hover. -->
+                    <button type="button" [attr.aria-pressed]="leg.priceType === 'MKT'" [disabled]="leg.exch === 'BFO'"
+                      [attr.title]="leg.exch === 'BFO' ? bfoMktReason : null" (click)="setType(leg, 'MKT')">Market</button>
+                  </span>
+                </td>
+                <td>
+                  @if (leg.priceType === 'LMT') {
+                    <input class="bx px" type="number" min="0" step="0.05" inputmode="decimal" [attr.aria-label]="'Limit price, ' + name"
+                      [value]="leg.price.toFixed(2)" (change)="setPrice(leg, $event)" />
+                  } @else {
+                    <span class="atmkt">At market</span>
                   }
                   @if (live !== null) {
                     <span class="live mu">Live {{ live }}</span>
@@ -97,6 +114,9 @@
           </tbody>
         </table>
       </div>
+      @if (mixedSides()) {
+        <p class="order-note mu" data-testid="order-note">Buy legs are placed first, for the margin benefit.</p>
+      }
 
       <div class="sum" aria-live="polite">
         @if (margin().status === 'error') {
@@ -141,7 +161,8 @@
         <ul>
           @for (leg of included(); track leg.id) {
             <li>
-              <b>{{ leg.side }}</b> {{ contract(leg) }} · Qty {{ qty(leg) }} · {{ leg.priceType === 'MKT' ? 'MKT' : leg.price.toFixed(2) }}
+              <b [class]="'side ' + (leg.side === 'B' ? 'sd-b' : 'sd-s')">{{ leg.side === 'B' ? 'BUY' : 'SELL' }}</b> {{ contract(leg) }} · Qty {{ qty(leg) }}
+              <span [class]="'otb ' + (leg.priceType === 'MKT' ? 'mk' : 'lm')">{{ orderTypeText(leg) }}</span>
               @if (leg.result) {
                 <span class="res mu">· Last run: {{ resultText(leg.result) }}</span>
               }
@@ -163,6 +184,10 @@
 
     @case ('results') {
       <div class="results">
+        <!-- Placed only means Kambala accepted the order: the summary follows each order until it is final. -->
+        @if (summary().text) {
+          <p [class]="'summary ' + summary().tone" role="status" data-testid="run-summary">{{ summary().text }}</p>
+        }
         <ul #resultList tabindex="-1" aria-label="Order results">
           @for (leg of withResult(); track leg.id) {
             @let r = resultLine(leg.result!);
@@ -173,6 +198,14 @@
         </ul>
         <div class="act">
           <button type="button" class="btn push" [disabled]="busy()" (click)="back()">Back</button>
+          @if (openCount() > 0) {
+            <button type="button" class="btn" [disabled]="cancelling()" [attr.aria-busy]="cancelling()" (click)="cancelOpen.emit()">
+              Cancel open orders
+            </button>
+          }
+          @if (retryCount() > 0) {
+            <button type="button" class="btn go" [disabled]="busy()" (click)="retry()">Retry failed legs</button>
+          }
         </div>
       </div>
     }

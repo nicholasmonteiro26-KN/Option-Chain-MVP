@@ -11,9 +11,8 @@ test.describe('theme screenshots', () => {
 
   for (const theme of ['light', 'dark'] as const) {
     test(`login page, ${theme}`, async ({ page }) => {
-      await page.addInitScript((t) => localStorage.setItem('ts.theme', t), theme);
-      await page.goto('/login');
-      await expect(page.getByTestId('theme-toggle')).toBeVisible({ timeout: 15000 });
+      await page.goto(`/login?theme=${theme}`);
+      await expect(page.locator('h1').first()).toBeVisible({ timeout: 15000 });
       await expect(page.locator('body')).toHaveAttribute('color-theme', theme);
       await page.screenshot({ path: `${DIR}/login-${theme}.png` });
     });
@@ -21,8 +20,7 @@ test.describe('theme screenshots', () => {
 
   for (const theme of ['light', 'dark'] as const) {
     test(`option chain, ${theme}`, async ({ page }) => {
-      await page.addInitScript((t) => localStorage.setItem('ts.theme', t), theme);
-      await page.goto('/option-chain?underlying=NSE:NIFTY&feed=mock');
+      await page.goto(`/option-chain?underlying=NSE:NIFTY&feed=mock&theme=${theme}`);
       await expect(page.locator('table.oc tbody tr:not(.spot)')).toHaveCount(16, { timeout: 15000 });
       await expect(page.getByTestId('spot-row')).toBeVisible({ timeout: 15000 });
       await expect(page.locator('td.k.atm')).toHaveCount(1, { timeout: 15000 });

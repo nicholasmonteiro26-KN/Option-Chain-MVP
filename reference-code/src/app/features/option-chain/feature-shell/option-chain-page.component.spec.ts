@@ -14,7 +14,7 @@ import { MockFeedTransport } from '../data-access/feed/mock-feed.transport';
 import { TickBuffer } from '../data-access/feed/tick-buffer';
 import { FEED_TRANSPORT, FeedTransport } from '../data-access/feed/transport';
 import { KambalaError, SessionExpiredError } from '../data-access/kambala/kambala.types';
-import { isNseFoSessionOpen, MARKET_SESSION_RULE } from '../data-access/market-session.service';
+import { isFoSessionOpen, MARKET_SESSION_RULE } from '../data-access/market-session.service';
 import { OptionChainStore } from '../data-access/option-chain.store';
 import { AuthSessionService } from '../data-access/auth-session.service';
 import { QUICK_UNDERLYINGS } from '../data-access/models';
@@ -100,7 +100,7 @@ async function setup(query: Record<string, string>, opts: SetupOpts = {}): Promi
       providers: [
         ...provideOptionChain(),
         // Real exchange hours (mock mode would otherwise be always open): NOW is a Thursday 11:30 IST.
-        { provide: MARKET_SESSION_RULE, useValue: isNseFoSessionOpen },
+        { provide: MARKET_SESSION_RULE, useValue: isFoSessionOpen },
         { provide: OPTION_CHAIN_USER_ID, useValue: 'u1' },
         { provide: MockMarket, useValue: market },
         { provide: KambalaRestClient, useValue: new MockKambalaRestClient(market) },
@@ -262,6 +262,25 @@ describe('OptionChainPageComponent', () => {
     await ctx.stable();
     expect(ctx.store.underlying()?.sym).toBe('SBIN');
     expect(url()).toContain('underlying=NSE:SBIN');
+  });
+
+  it('search lists NSE (NFO) results before BSE (BFO) ones, whatever order Kambala returns', async () => {
+    const ctx = await setup({});
+    vi.spyOn(ctx.get(KambalaRestClient), 'searchScrip').mockResolvedValue([
+      { exch: 'BSE', tsym: 'RELIANCE', token: '500325', name: 'RELIANCE INDUSTRIES LTD' },
+      { exch: 'BSE', tsym: 'RELINFRA', token: '500390', name: 'RELIANCE INFRASTRUCTURE' },
+      { exch: 'NSE', tsym: 'RELIANCE-EQ', token: '2885', name: 'RELIANCE INDUSTRIES LTD' },
+    ]);
+    const input = q(ctx, '[data-testid="underlying-search"]') as HTMLInputElement;
+    input.value = 'RELI';
+    input.dispatchEvent(new Event('input'));
+    await new Promise((r) => setTimeout(r, 300)); // the bar's 250 ms debounce
+    await ctx.stable();
+    const options = [...ctx.el.querySelectorAll('[role="option"]')];
+    expect(options.map((o) => text(o.querySelector('.kind')))).toEqual(['Stock · NFO', 'Stock · BFO', 'Stock · BFO']);
+    // Symbol and name are separate elements with a gap between them.
+    expect(text(options[0]!.querySelector('.nm b'))).toBe('RELIANCE');
+    expect(text(options[0]!.querySelector('.nm small'))).toBe('RELIANCE INDUSTRIES LTD');
   });
 
   it('quick switch to SENSEX selects it', async () => {
@@ -438,10 +457,12 @@ describe('OptionChainPageComponent', () => {
 
   // ---- market session (exchange hours, not the feed status) ----
 
-  it('after hours the toolbar says Market closed (no banner row), one analysis still runs, and nothing is marked stale', async () => {
+  it('after hours the dot is red Market closed (no notice line, no closing time, no banner row), one analysis still runs, and nothing is marked stale', async () => {
     const ctx = await setup({}, { now: Date.parse('2026-10-29T16:00:00+05:30') });
-    expect(ctx.transport.status()).toBe('open'); // the socket is up: the notice follows exchange hours
-    expect(text(q(ctx, 'oc-view-toolbar [data-testid="market-notice"]'))).toContain('Market closed');
+    expect(ctx.transport.status()).toBe('open'); // the socket is up: the dot follows exchange hours
+    expect(q(ctx, 'oc-expiry-strip .dot')!.getAttribute('aria-label')).toBe('Market closed');
+    expect(q(ctx, '[data-testid="market-notice"]')).toBeNull();
+    expect(ctx.el.textContent).not.toContain('15:30');
     expect(q(ctx, '[data-testid="status-banner"]')).toBeNull();
     expect(ctx.store.analytics()).not.toBeNull();
     await ctx.advance(36_000);
@@ -479,16 +500,16 @@ describe('OptionChainPageComponent', () => {
     expect(a?.cumOi).toBeGreaterThan(0);
   });
 
-  it('the notice flips to Market closed on the 30 s session tick at 15:30 IST', async () => {
-    const ctx = await setup({}, { now: Date.parse('2026-10-29T15:29:40+05:30') });
-    expect(q(ctx, '[data-testid="market-notice"]')).toBeNull();
+  it('the dot turns red Market closed on the 30 s session tick at 15:40 IST', async () => {
+    const ctx = await setup({}, { now: Date.parse('2026-10-29T15:39:40+05:30') });
+    expect(q(ctx, 'oc-expiry-strip .dot')!.getAttribute('aria-label')).toContain('Live');
     await ctx.advance(30_000);
-    expect(text(q(ctx, '[data-testid="market-notice"]'))).toContain('Market closed');
+    expect(q(ctx, 'oc-expiry-strip .dot')!.getAttribute('aria-label')).toBe('Market closed');
   });
 
   it('a feed drop still shows Reconnecting after hours (reconnecting outranks closed)', async () => {
     const ctx = await setup({}, { now: Date.parse('2026-10-31T11:00:00+05:30') }); // Saturday
-    expect(text(q(ctx, '[data-testid="market-notice"]'))).toContain('Market closed');
+    expect(q(ctx, 'oc-expiry-strip .dot')!.getAttribute('aria-label')).toBe('Market closed');
     ctx.transport.drop();
     await ctx.stable();
     expect(text(q(ctx, '[data-testid="status-banner"]'))).toContain('Reconnecting');
@@ -591,7 +612,7 @@ describe('OptionChainPageComponent: Build your strategy', () => {
 
   it('ticking a call shows "Build your strategy 1"; opening it lists the leg; deleting the leg unticks the chain', async () => {
     const ctx = await setup({});
-    expect(buildBtn(ctx).disabled).toBe(true);
+    expect(buildBtn(ctx).getAttribute('aria-disabled')).toBe('true');
     const box = callBoxes(ctx)[3]!;
     box.click();
     await ctx.stable();
@@ -684,7 +705,7 @@ describe('OptionChainPageComponent: Build your strategy', () => {
     expect(ask).toHaveBeenCalledTimes(3);
   });
 
-  it('Execute all → Place → each leg shows Placed with a MOCK order number; no real REST client in mock mode', async () => {
+  it('Execute all → Place → each order is followed: Open (limit, first check), then Filled; no real REST client in mock mode', async () => {
     const realPlace = vi.spyOn(KambalaRestClient.prototype, 'placeOrder');
     const realMargin = vi.spyOn(KambalaRestClient.prototype, 'getBasketMargin');
     const ctx = await setup({}, { providers: [realProvider(KambalaRestClient)] });
@@ -699,11 +720,73 @@ describe('OptionChainPageComponent: Build your strategy', () => {
     await ctx.stable();
     button(ctx, 'Place 2 orders').click();
     await ctx.stable();
-    const results = [...ctx.el.querySelectorAll('oc-strategy-panel .results li')].map(text);
-    expect(results).toHaveLength(2);
-    for (const r of results) expect(r).toMatch(/^Placed B .* · #MOCK\d{6}$/);
+    const results = () => [...ctx.el.querySelectorAll('oc-strategy-panel .results li')].map(text);
+    const summary = () => text(q(ctx, '[data-testid="run-summary"]'));
+    expect(results()).toHaveLength(2);
+    for (const r of results()) expect(r).toMatch(/^Open B .* · waiting to fill · #MOCK\d{6}$/);
+    expect(summary()).toBe('Waiting for 2 of 2 orders to fill…');
+    expect(button(ctx, 'Cancel open orders')).toBeTruthy();
+
+    await ctx.advance(2000); // the next status check (every 2 s at first)
+    for (const r of results()) expect(r).toMatch(/^Filled B .* · 65 @ ₹[\d.]+ · #MOCK\d{6}$/);
+    expect(summary()).toBe('All 2 legs filled.');
+    expect([...ctx.el.querySelectorAll('oc-strategy-panel button')].map(text)).not.toContain('Cancel open orders');
     expect(realPlace).not.toHaveBeenCalled();
     expect(realMargin).not.toHaveBeenCalled();
+  });
+
+  it('Cancel open orders cancels the unfilled ones; the run then reads as nothing went through, and Retry puts the legs back', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    putBoxes(ctx)[5]!.click();
+    await ctx.stable();
+    await open(ctx);
+    await ctx.advance(400);
+    button(ctx, 'Execute all').click();
+    await ctx.stable();
+    button(ctx, 'Place 2 orders').click();
+    await ctx.stable();
+    const cancel = vi.spyOn(ctx.get(KambalaRestClient), 'cancelOrder');
+    button(ctx, 'Cancel open orders').click();
+    await ctx.stable();
+    expect(cancel).toHaveBeenCalledTimes(2);
+    const results = [...ctx.el.querySelectorAll('oc-strategy-panel .results li')].map(text);
+    for (const r of results) expect(r).toMatch(/^Cancelled B .* · #MOCK\d{6}$/);
+    expect(text(q(ctx, '[data-testid="run-summary"]'))).toContain('No order went through');
+
+    button(ctx, 'Retry failed legs').click();
+    await ctx.stable();
+    expect(q(ctx, 'oc-strategy-panel .results')).toBeNull(); // back to editing
+    expect(button(ctx, 'Execute all').disabled).toBe(false);
+    expect(ctx.get(StrategyStore).current().legs.every((l) => l.included && !l.result)).toBe(true);
+  });
+
+  it('a leg the exchange rejects after placing shows Rejected, and the run is an incomplete position', async () => {
+    const ctx = await setup({});
+    callBoxes(ctx)[3]!.click();
+    putBoxes(ctx)[5]!.click();
+    await ctx.stable();
+    await open(ctx);
+    await ctx.advance(400);
+    const rest = ctx.get(KambalaRestClient);
+    const real = rest.orderStatus.bind(rest);
+    let first = '';
+    vi.spyOn(rest, 'orderStatus').mockImplementation(async (no: string) => {
+      first ||= no;
+      if (no === first) return { norenordno: no, status: 'REJECTED', qty: '65', fillshares: '0', rejreason: 'RMS: margin exceeds' };
+      return { ...(await real(no)), status: 'COMPLETE', fillshares: '65', avgprc: '10.00' };
+    });
+    button(ctx, 'Execute all').click();
+    await ctx.stable();
+    button(ctx, 'Place 2 orders').click();
+    await ctx.stable();
+    const results = [...ctx.el.querySelectorAll('oc-strategy-panel .results li')].map(text);
+    expect(results.some((r) => r.startsWith('Rejected') && r.includes('RMS: margin exceeds'))).toBe(true);
+    expect(results.some((r) => r.startsWith('Filled'))).toBe(true);
+    expect(text(q(ctx, '[data-testid="run-summary"]'))).toBe(
+      'Incomplete position: 1 of 2 legs filled. Cancel the open orders or retry the failed legs.',
+    );
+    expect(button(ctx, 'Retry failed legs')).toBeTruthy();
   });
 
   it('Execute never runs twice concurrently', async () => {

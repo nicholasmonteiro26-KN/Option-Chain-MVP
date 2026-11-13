@@ -51,7 +51,8 @@ test('Custom shows the editor, Price hides it', async ({ page }) => {
 
 test('an unticked Custom column survives a reload', async ({ page }) => {
   await open(page);
-  const oiHeader = page.locator('table.oc thead th', { hasText: /^OI$/ });
+  // Headers carry their unit, e.g. "OI (In Lacs)".
+  const oiHeader = page.locator('table.oc thead th', { hasText: /^\s*OI\s*\(In\s*Lacs\)\s*$/ });
   await page.getByTestId('preset-custom').click();
   await expect(oiHeader.first()).toBeVisible(T);
   await page.getByTestId('custom-editor').locator('input[type="checkbox"][value="oi"]').uncheck();
@@ -59,7 +60,7 @@ test('an unticked Custom column survives a reload', async ({ page }) => {
   await page.reload();
   await expect(rows(page)).toHaveCount(16, T);
   await expect(page.getByTestId('preset-custom')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('table.oc thead th', { hasText: /^OI Chg$/ }).first()).toBeVisible();
+  await expect(page.locator('table.oc thead th', { hasText: /OI Chg/ }).first()).toBeVisible();
   await expect(oiHeader).toHaveCount(0);
   await page.getByTestId('preset-custom').click();
   await expect(page.getByTestId('custom-editor').locator('input[value="oi"]')).not.toBeChecked();
@@ -67,8 +68,11 @@ test('an unticked Custom column survives a reload', async ({ page }) => {
 
 test('switching expiry puts expiry= in the URL', async ({ page }) => {
   await open(page);
-  await page.getByTestId('expiry-2026-11-10').click();
-  await expect(page).toHaveURL(/expiry=2026-11-10/, T);
+  // The demo calendar rolls from today, so take the second expiry button whatever its date.
+  const second = page.locator('[data-testid^="expiry-20"]').nth(1);
+  const iso = (await second.getAttribute('data-testid'))!.slice('expiry-'.length);
+  await second.click();
+  await expect(page).toHaveURL(new RegExp(`expiry=${iso}`), T);
   await expect(rows(page)).toHaveCount(16, T);
 });
 
@@ -194,44 +198,17 @@ test('a direct visit to /auth/callback says no login is in progress, drops the c
 test.describe('theme', () => {
   const bg = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
-  test('toggle switches to dark, survives a reload, and switches back', async ({ page }) => {
-    await open(page);
-    const toggle = page.getByTestId('theme-toggle');
-    await expect(page.locator('body')).toHaveAttribute('color-theme', 'light');
-    expect(await bg(page)).toBe('rgb(255, 255, 255)');
-    await expect(toggle).toHaveAttribute('aria-label', 'Switch to dark theme');
-
-    await toggle.click();
+  test('has no theme switch; ?theme=dark (the client\'s TradeSmart platform theme) opens dark', async ({ page }) => {
+    await open(page, `${URL}&theme=dark`);
+    await expect(page.getByTestId('theme-toggle')).toHaveCount(0);
     await expect(page.locator('body')).toHaveAttribute('color-theme', 'dark');
     expect(await bg(page)).toBe('rgb(10, 18, 34)');
-    await expect(toggle).toHaveAttribute('aria-label', 'Switch to light theme');
-
-    await page.reload();
-    await expect(rows(page)).toHaveCount(16, T);
-    await expect(page.locator('body')).toHaveAttribute('color-theme', 'dark');
-    expect(await bg(page)).toBe('rgb(10, 18, 34)');
-
-    await page.getByTestId('theme-toggle').click();
-    await expect(page.locator('body')).toHaveAttribute('color-theme', 'light');
-    expect(await bg(page)).toBe('rgb(255, 255, 255)');
   });
 
-  test('the toggle works on the login page', async ({ page }) => {
-    await page.goto('/login');
-    const toggle = page.getByTestId('theme-toggle');
-    await expect(toggle).toBeVisible(T);
-    expect(await bg(page)).toBe('rgb(255, 255, 255)');
-    await toggle.click();
-    await expect(page.locator('body')).toHaveAttribute('color-theme', 'dark');
-    expect(await bg(page)).toBe('rgb(10, 18, 34)');
-    await expect(toggle).toHaveAttribute('aria-label', 'Switch to light theme');
-  });
-
-  test('follows the system setting until a choice is made', async ({ page }) => {
+  test('light by default, even when the computer is in dark mode', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await open(page);
-    await expect(page.locator('body')).toHaveAttribute('color-theme', 'dark');
-    await page.emulateMedia({ colorScheme: 'light' });
     await expect(page.locator('body')).toHaveAttribute('color-theme', 'light');
+    expect(await bg(page)).toBe('rgb(255, 255, 255)');
   });
 });

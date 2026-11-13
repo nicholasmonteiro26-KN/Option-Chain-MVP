@@ -157,12 +157,48 @@ describe('StrategyStore', () => {
     s.setLotMultiplier(4);
     s.setProduct('M');
     expect(s.current()).toMatchObject({ lotMultiplier: 4, product: 'M' });
-    s.resetPrices(new Map([['NFO|230001', 12], ['NFO|231001', 22]]));
-    expect(s.current().legs.map((l) => l.price)).toEqual([12, 20]);
+    const book = new Map([['NFO|230001', 12], ['NFO|231001', 22]]);
+    s.resetPrices((k) => ({ ltp: book.get(k) ?? null, bid: null, ask: null }));
+    expect(s.current().legs.map((l) => l.price)).toEqual([12, 20]); // the market leg keeps its price
     s.remove(s.current().legs[0]!.id);
     expect(s.current().legs.length).toBe(1);
     s.clear();
     expect(s.current().legs).toEqual([]);
+  });
+
+  it('a new leg is a limit buy at the best ask (else the LTP); a swap prices a sell at the bid, a buy at the ask', () => {
+    const s = make();
+    s.toggle({ ...contract(23000, 'CE', 14.95), bid: 14.9, ask: 15.05 });
+    expect(s.current().legs[0]).toMatchObject({ side: 'B', priceType: 'LMT', price: 15.05 });
+    s.toggle({ ...contract(23100, 'CE', 9.1), bid: null, ask: 0 }); // no ask: the LTP
+    expect(s.current().legs[1]!.price).toBe(9.1);
+    const id = s.current().legs[0]!.id;
+    s.update(id, { side: 'S' });
+    s.swap(id, { ...contract(23050, 'CE', 12), bid: 11.8, ask: 12.2 });
+    expect(s.current().legs[0]!.price).toBe(11.8);
+  });
+
+  it('Reset prices: limit buys to the ask, limit sells to the bid (else the LTP), rounded to the tick', () => {
+    const s = make();
+    s.toggle(contract(23000, 'CE', 10));
+    s.toggle(contract(23100, 'CE', 20));
+    s.update(s.current().legs[1]!.id, { side: 'S' });
+    const book: Record<string, { ltp: number; bid: number | null; ask: number | null }> = {
+      'NFO|230001': { ltp: 10.5, bid: 10.4, ask: 10.62 },
+      'NFO|231001': { ltp: 21, bid: null, ask: 21.2 },
+    };
+    s.resetPrices((k) => book[k] ?? { ltp: null, bid: null, ask: null });
+    expect(s.current().legs.map((l) => l.price)).toEqual([10.6, 21]);
+  });
+
+  it('All legs: Market sets every leg but BSE ones (which stay limit) and says how many stayed; Limit sets all', () => {
+    const s = make();
+    s.toggle(contract(23000));
+    s.toggle({ ...contract(23100), exch: 'BFO', token: 'BFO|1' });
+    expect(s.setPriceTypeAll('MKT')).toBe(1);
+    expect(s.current().legs.map((l) => l.priceType)).toEqual(['MKT', 'LMT']);
+    expect(s.setPriceTypeAll('LMT')).toBe(0);
+    expect(s.current().legs.map((l) => l.priceType)).toEqual(['LMT', 'LMT']);
   });
 
   it('netPremium sums included legs, S positive and B negative, times qty', () => {

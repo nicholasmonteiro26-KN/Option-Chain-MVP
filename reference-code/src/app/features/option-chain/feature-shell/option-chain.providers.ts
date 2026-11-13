@@ -6,7 +6,7 @@ import { NorenSocketService } from '../data-access/feed/noren-socket.service';
 import { TickBuffer } from '../data-access/feed/tick-buffer';
 import { FEED_TRANSPORT } from '../data-access/feed/transport';
 import { InstrumentsService } from '../data-access/instruments.service';
-import { isNseFoSessionOpen, MARKET_SESSION_RULE, MarketSessionService } from '../data-access/market-session.service';
+import { isFoSessionOpen, MARKET_SESSION_RULE, MarketSessionService } from '../data-access/market-session.service';
 import { KAMBALA_REST_BASE, KambalaRestApi, KambalaRestClient } from '../data-access/kambala/kambala-rest.client';
 import { NOREN_SESSION_CONFIG, NorenSessionConfig } from '../data-access/kambala/kambala.types';
 import { OptionChainStore } from '../data-access/option-chain.store';
@@ -17,6 +17,7 @@ import { MockKambalaRestClient } from '../data-access/testing/mock-kambala-rest.
 import { MockMarket } from '../data-access/testing/mock-market';
 import { StrategyMarginService } from '../strategy/strategy-margin.service';
 import { StrategyStore } from '../strategy/strategy.store';
+import { OrderTracker } from '../strategy/order-tracker.service';
 import { environment } from '../../../../environments/environment';
 
 const currentSearch = (): string => (typeof window === 'undefined' ? '' : window.location.search);
@@ -79,8 +80,10 @@ export function provideOptionChain(): Provider[] {
     // The "Build your strategy" legs (per underlying, kept in sessionStorage per user) and their margin.
     StrategyStore,
     StrategyMarginService,
+    // Follows placed strategy orders (filled / rejected / cancelled) until each is final.
+    OrderTracker,
     // The simulated market trades around the clock; the real one follows exchange hours.
-    { provide: MARKET_SESSION_RULE, useFactory: () => (inject(OPTION_CHAIN_MOCK_MODE) ? () => true : isNseFoSessionOpen) },
+    { provide: MARKET_SESSION_RULE, useFactory: () => (inject(OPTION_CHAIN_MOCK_MODE) ? () => true : isFoSessionOpen) },
     { provide: TickBuffer, useFactory: () => new TickBuffer(inject(CHAIN_FEED_CLOCK)) },
     {
       provide: MockMarket,

@@ -1,6 +1,6 @@
 // The "Build your strategy" pop-up (spec mock-up): 600px, anchored by the page. Tokens only (light + dark).
 // Kept lean for the 4 kB component budget: flat class selectors, few descendant ones.
-:host { display: block; width: 600px; max-width: 100%; color: var(--ts-fg); font: 12.5px var(--ts-font); }
+:host { display: block; width: 680px; max-width: 100%; color: var(--ts-fg); font: 12.5px var(--ts-font); }
 .fs { border: 0; margin: 0; padding: 0; min-width: 0; }
 .pop {background: var(--ts-bg); border: 1px solid var(--ts-line); border-radius: 8px; box-shadow: 0 14px 40px -12px var(--ts-shadow); }
 .head, .act { display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
@@ -29,7 +29,18 @@ input[type='checkbox'] { accent-color: var(--ts-blue); }
 .ce, .bad { color: var(--ts-red); background: var(--ts-red-soft); }
 .pe, .ok { color: var(--ts-green); background: var(--ts-green-soft); }
 .step { display: inline-flex; align-items: center; }
-.mkt { font-size: 10.5px; padding: 1px 4px; margin-left: 4px; }
+// Limit | Market: one segmented switch per leg (and "All legs" in the header); the pressed side is filled blue.
+.seg { display: inline-flex; border: 1px solid var(--ts-input-border); border-radius: 4px; overflow: hidden; }
+.seg button { border-radius: 0; padding: 3px 8px; font-size: 11.5px; }
+.seg [aria-pressed='true'] { color: var(--ts-on-accent); background: var(--ts-blue); font-weight: 600; }
+.all-lbl { margin-left: 12px; font-size: 11.5px; }
+.atmkt { display: inline-block; width: 64px; font-weight: 600; color: var(--ts-blue); }
+.side { display: inline-block; min-width: 34px; }
+.sd-b { color: var(--ts-blue); }
+.sd-s { color: var(--ts-red); }
+.otb { margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+.lm { color: var(--ts-blue); background: var(--ts-blue-soft); }
+.mk { color: var(--ts-warn); border: 1px solid var(--ts-warn); }
 [aria-pressed='true'] { color: var(--ts-blue); background: var(--ts-blue-soft); }
 .live, .res { display: block; font-size: 10.5px; }
 
@@ -48,3 +59,10 @@ ul { list-style: none; margin: 0; padding: 10px 14px; display: grid; gap: 6px; }
 .meta { margin: 0 14px 10px; }
 .pill { display: inline-block; min-width: 64px; border-radius: 9px; font-size: 11px; font-weight: 600; text-align: center; }
 .skip { background: var(--ts-bg2); }
+.wait { color: var(--ts-warn); background: var(--ts-warn-soft); }
+// Run summary: one line above the results.
+.summary { margin: 10px 14px 0; padding: 8px 10px; border-radius: 6px; font-weight: 600; }
+.summary.ok { color: var(--ts-green); background: var(--ts-green-soft); }
+.summary.wait { color: var(--ts-fg); background: var(--ts-bg2); }
+.summary.warn, .summary.bad { color: var(--ts-red); background: var(--ts-red-soft); }
+.order-note { margin: 0; padding: 6px 14px; font-size: 11.5px; border-top: 1px solid var(--ts-line); }

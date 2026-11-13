@@ -130,6 +130,18 @@ export class OptionChainStore {
     for (const k of this.feedCache.keys()) if (!keep.has(k) && !this.legKeys.has(k)) this.feedCache.delete(k);
   }
 
+  /** Last price and best bid / ask of a chain or held contract right now (for default limit prices). */
+  bookOf(key: string): { ltp: number | null; bid: number | null; ask: number | null } {
+    const q = this._quotes().get(key)?.();
+    const raw = this.feedCache.get(key);
+    const pick = (a: number | null | undefined, b: number | null | undefined): number | null => a ?? b ?? null;
+    return {
+      ltp: pick(this._legPrices().get(key), pick(q?.ltp, raw?.ltp)),
+      bid: pick(q?.bid, raw?.bid),
+      ask: pick(q?.ask, raw?.ask),
+    };
+  }
+
   /** Sets the keys whose ticks feed `legPrices`; prices of keys no longer held are dropped. */
   setLegKeys(keys: ReadonlySet<string>): void {
     this.legKeys = new Set(keys);

@@ -32,6 +32,8 @@ const DOT: Record<FeedStatus, { cls: string; label: string }> = {
   connecting: { cls: 'off', label: 'Feed status: Connecting' },
   'session-expired': { cls: 'err', label: 'Feed status: Session expired' },
 };
+/** Outside the selected market's trading hours (whatever the socket says). */
+const MARKET_CLOSED = { cls: 'err', label: 'Market closed' };
 
 /** 'YYYY-MM-DD' -> 'DD Mon YYYY'. */
 export function formatExpiryDate(iso: string): string {
@@ -119,6 +121,8 @@ export class ExpiryStripComponent {
   readonly nowMs = input.required<number>();
   readonly stats = input.required<ExpiryStats>();
   readonly feedStatus = input<FeedStatus>('connecting');
+  /** The selected underlying's market is in its trading session (the dot is green only then). */
+  readonly marketOpen = input(true);
   readonly partial = input(false);
 
   readonly expiryChange = output<Expiry>();
@@ -131,7 +135,13 @@ export class ExpiryStripComponent {
   protected readonly more = computed(() => this.chips().slice(NEAR_COUNT));
   protected readonly inMore = computed(() => this.more().some((e) => e.expiry.iso === this.selected().iso));
   protected readonly selectedDate = computed(() => formatExpiryDate(this.selected().iso));
-  protected readonly dot = computed(() => DOT[this.feedStatus()]);
+  /** Green only while the feed is live and that market is open; red when the market is closed. Session expiry and
+   *  reconnecting keep their own colours. */
+  protected readonly dot = computed(() => {
+    const st = this.feedStatus();
+    if (st === 'session-expired' || st === 'reconnecting' || this.marketOpen()) return DOT[st];
+    return MARKET_CLOSED;
+  });
   protected readonly dotClass = computed(() => `dot ${this.dot().cls}`.trim());
   protected readonly atmIv = computed(() => this.fixed(this.stats().atmIv === null ? null : this.stats().atmIv! * 100));
   protected readonly cumOi = computed(() => {

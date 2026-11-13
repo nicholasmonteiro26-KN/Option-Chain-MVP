@@ -101,8 +101,8 @@ const money = (v: number | null | undefined): string =>
                 [attr.aria-selected]="i === activeIdx()"
                 (mousedown)="$event.preventDefault(); choose(r)"
               >
-                <span><b>{{ r.sym }}</b> <small>{{ r.name }}</small></span>
-                <small>{{ r.isIndex ? 'Index' : 'Stock' }} · {{ r.foExch }}</small>
+                <span class="nm"><b>{{ r.sym }}</b><small>{{ r.name }}</small></span>
+                <small class="kind">{{ r.isIndex ? 'Index' : 'Stock' }} · {{ r.foExch }}</small>
               </li>
             }
           </ul>
@@ -110,8 +110,7 @@ const money = (v: number | null | undefined): string =>
           <p class="none" role="status">No index or stock with options matches "{{ text().trim() }}"</p>
         }
       </div>
-      <div class="tools"><ng-content /></div>
-    </div>
+          </div>
   `,
   styles: `
     :host { display: block; color: var(--ts-fg); background: var(--ts-bg); font-family: var(--ts-font); }
@@ -130,7 +129,6 @@ const money = (v: number | null | undefined): string =>
     .qbtn:focus-visible, input:focus-visible { outline: 2px solid var(--ts-focus); outline-offset: 2px; }
     .pos { color: var(--ts-green); }
     .neg { color: var(--ts-red); }
-    .tools { display: flex; align-items: center; gap: 10px; }
     .search { position: relative; margin-left: auto; flex: 0 1 300px; min-width: 200px; }
     .search input {
       width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 7px 10px;
@@ -141,7 +139,11 @@ const money = (v: number | null | undefined): string =>
       background: var(--ts-bg); border: 1px solid var(--ts-line); border-radius: 8px;
       box-shadow: 0 12px 30px -14px var(--ts-shadow); max-height: 260px; overflow: auto;
     }
-    .search li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .search li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    /* Symbol and name with a clear gap (no reliance on a whitespace text node between the tags). */
+    .search .nm { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .search .nm small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .search .kind { flex: none; white-space: nowrap; }
     .search small { color: var(--ts-muted); font-size: 11.5px; }
     .search li[aria-selected='true'], .search li:hover { background: var(--ts-blue-soft); }
     .none { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; margin: 0; padding: 8px 10px; font-size: 13px;

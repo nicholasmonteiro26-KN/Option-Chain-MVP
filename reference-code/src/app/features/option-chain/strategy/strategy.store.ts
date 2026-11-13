@@ -1,8 +1,11 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { OPTION_CHAIN_MOCK_MODE, OPTION_CHAIN_USER_ID } from '../feature-shell/option-chain.providers';
 import {
-  LegContract, LegEdit, LegResult, MAX_LEGS, Product, roundToTick, Strategy, StrategyLeg,
+  entryPrice, isBfoMarket, isRetryable, LegContract, LegEdit, LegResult, MAX_LEGS, OrderState, Product, roundToTick, Strategy, StrategyLeg,
 } from './strategy.models';
+
+/** Best bid / ask / last price of a contract by feed key (for default limit prices). */
+export type BookOf = (token: string) => { ltp: number | null; bid: number | null; ask: number | null };
 
 type ByUnderlying = Record<string, Strategy>;
 
@@ -99,9 +102,11 @@ export class StrategyStore {
       return 'removed';
     }
     if (cur.legs.length >= MAX_LEGS) return 'full';
-    const { ltp, ...rest } = c;
+    const { ltp, bid, ask, ...rest } = c;
+    // Limit by default, priced where a buy would trade now (the ask), else the last price.
     const leg: StrategyLeg = {
-      ...rest, id: `leg-${++this.counter}`, side: 'B', lots: 1, priceType: 'LMT', price: ltp ?? 0, included: true,
+      ...rest, id: `leg-${++this.counter}`, side: 'B', lots: 1, priceType: 'LMT',
+      price: entryPrice('B', { ltp, bid, ask }, c.tickSize), included: true,
     };
     this.mutate((s) => ({ ...s, legs: [...s.legs, leg] }));
     return 'added';
@@ -126,8 +131,8 @@ export class StrategyStore {
   swap(id: string, c: LegContract): 'ok' | 'duplicate' {
     const k = c.token;
     if (this.current().legs.some((l) => l.id !== id && l.token === k)) return 'duplicate';
-    const { ltp, ...rest } = c;
-    this.mapLeg(id, (l) => ({ ...withoutResult(l), ...rest, price: ltp ?? 0 }));
+    const { ltp, bid, ask, ...rest } = c;
+    this.mapLeg(id, (l) => ({ ...withoutResult(l), ...rest, price: entryPrice(l.side, { ltp, bid, ask }, c.tickSize) }));
     return 'ok';
   }
 
@@ -140,14 +145,32 @@ export class StrategyStore {
     this.mutate((s) => ({ ...s, product }));
   }
 
-  resetPrices(live: ReadonlyMap<string, number>): void {
+  /** Limit legs back to where they would trade now: the ask for a buy, the bid for a sell (else the last price). */
+  resetPrices(book: BookOf): void {
     this.mutate((s) => ({
       ...s,
       legs: s.legs.map((l) => {
-        const px = live.get(l.token);
-        return l.priceType === 'LMT' && px !== undefined ? { ...l, price: px } : l;
+        const px = entryPrice(l.side, book(l.token), l.tickSize);
+        return l.priceType === 'LMT' && px > 0 ? { ...withoutResult(l), price: px } : l;
       }),
     }));
+  }
+
+  /**
+   * One order type for every leg ("All legs: Limit / Market"). Market skips BSE (BFO) legs, which stay limit orders
+   * (BFO market orders are not available). Returns how many legs were left as limit for that reason.
+   */
+  setPriceTypeAll(priceType: 'LMT' | 'MKT'): number {
+    let kept = 0;
+    this.mutate((s) => ({
+      ...s,
+      legs: s.legs.map((l) => {
+        if (l.priceType === priceType) return l;
+        if (isBfoMarket({ exch: l.exch, priceType })) { kept++; return l; }
+        return { ...withoutResult(l), priceType };
+      }),
+    }));
+    return kept;
   }
 
   /**
@@ -170,6 +193,37 @@ export class StrategyStore {
     // Save now: a run can finish after the page is torn down (session expiry, reload), when the write effect is gone;
     // a placed leg must reach storage unticked or the next Execute all would send it again.
     this.write(this.byUnderlying());
+  }
+
+  /** The exchange state of a placed leg's order (order tracking), on the strategy of `key`. */
+  setOrderState(key: string, legId: string, order: OrderState): void {
+    this.byUnderlying.update((by) => {
+      const s = by[key];
+      const leg = s?.legs.find((l) => l.id === legId);
+      if (!s || leg?.result?.status !== 'placed') return by;
+      const prev = leg.result.order;
+      if (prev && prev.phase === order.phase && prev.filledQty === order.filledQty && prev.avgPrice === order.avgPrice) return by;
+      const legs = s.legs.map((l) => (l.id === legId ? { ...l, result: { ...leg.result!, order } as StrategyLeg['result'] } : l));
+      return { ...by, [key]: { ...s, legs } };
+    });
+  }
+
+  /**
+   * Retry failed legs: every leg that was rejected, not sent, or placed and then rejected / cancelled with nothing
+   * filled goes back into the strategy (included, result cleared) for the next Execute all. Filled and partly filled
+   * legs stay out. Returns how many legs came back.
+   */
+  retryFailed(): number {
+    let n = 0;
+    this.mutate((s) => ({
+      ...s,
+      legs: s.legs.map((l) => {
+        if (!isRetryable(l)) return l;
+        n++;
+        return { ...withoutResult(l), included: true };
+      }),
+    }));
+    return n;
   }
 
   /** Clears everything and the stored copy (log out). */

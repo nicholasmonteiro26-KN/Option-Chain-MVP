@@ -15,8 +15,10 @@ export interface ColumnDef {
   bar?: 'oi' | 'cumOi';
   flash?: boolean;
   customisable: boolean;
-  /** Id of a column rendered as a sub-line under this one. */
+  /** Id of a column rendered with this one: a sub-line under it, or with `subInline`, in brackets on the same line. */
   sub?: string;
+  /** Render `sub` as " (value)" after the main value on one line, e.g. "-12.40 (-3.20%)". */
+  subInline?: boolean;
   /** Cells carry the exact value as a tooltip (OI and volume are shown rounded to lakhs). */
   exact?: boolean;
   /** Tooltip of the header and every cell (e.g. the GEX sign convention). */
@@ -106,9 +108,11 @@ const DEFS: ColumnDef[] = [
   sideQ('bid', 'Bid', (x) => x.bid, price),
   sideQ('ask', 'Ask', (x) => x.ask, price),
   sideQ('ltp', 'LTP', (x) => x.ltp, price, { flash: true }),
-  sideQ('ltpChg', 'LTP', (x) => x.ltp, price, { flash: true, sub: 'chgPct', customisable: false }),
   sideQ('chg', 'Chg', chgOf, signedPrice),
   sideQ('chgPct', 'Chg %', chgPctOf, signedFmt(2)),
+  // Price change since the previous close with the % change in brackets, on one line: "-12.40 (-3.20%)".
+  sideQ('ltpChgPct', 'LTP Chg (%)', chgOf, signedPrice, { sub: 'chgPctBr', subInline: true }),
+  sideQ('chgPctBr', 'Chg %', chgPctOf, num((n) => `${signed(n, 2)}%`), { customisable: false }),
   sideQ('open', 'Open', (x) => x.open, price),
   sideQ('high', 'High', (x) => x.high, price),
   sideQ('low', 'Low', (x) => x.low, price),

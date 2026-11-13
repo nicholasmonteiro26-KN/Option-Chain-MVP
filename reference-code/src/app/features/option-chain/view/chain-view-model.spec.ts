@@ -152,11 +152,14 @@ describe('buildViewModel', () => {
 describe('PRESETS and COLUMNS', () => {
   it('has exact column lists', () => {
     const by = Object.fromEntries(PRESETS.map((p) => [p.id, p]));
-    expect(by['default']!.columns).toEqual(['volume', 'oi', 'bid', 'ask', 'ltpChg']);
+    expect(by['default']!.columns).toEqual(['volume', 'oi', 'oiChgPct', 'ltpChgPct', 'ltp']);
     expect(by['price']!.columns).toEqual(['chgPct', 'chg', 'bid', 'ask', 'ltp']);
     expect(by['oi']!.columns).toEqual(['oiSense', 'oiChgPct', 'oiChg', 'oi', 'itmProb']);
     expect(by['candle']!.columns).toEqual(['volume', 'low', 'high', 'open', 'ltp']);
-    expect(by['stats']!.columns).toEqual(['straddle', 'cumOi', 'avgIv', 'pcrOi', 'pcrVol', 'gexOiCr', 'gexVolCr']);
+    expect(by['stats']!.columns).toEqual(['straddle', 'cumOi', 'avgIv', 'pcrOi', 'pcrVol', 'gexOiCr']);
+    expect(by['straddle']!.columns).toEqual(
+      ['straddle', 'straddleBid', 'straddleAsk', 'strDecay', 'cumOi', 'avgIv', 'pcrOi', 'pcrVol'],
+    );
     expect(by['straddle']!.mode).toBe('strike');
     expect(PRESETS.every((p) => p.columns.every((c) => COLUMNS[c]))).toBe(true);
   });

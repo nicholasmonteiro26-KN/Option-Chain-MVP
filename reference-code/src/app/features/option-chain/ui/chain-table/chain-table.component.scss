@@ -84,7 +84,12 @@ th .sort {
 }
 
 
+// One row height on every tab (Default, Price, Greeks, …), so each shows the same number of strikes.
+$row-h: 36px;
+
 td {
+  height: $row-h;
+  box-sizing: border-box;
   padding: 6px 10px;
   border-bottom: 1px solid var(--ts-line);
   text-align: center;
@@ -147,6 +152,7 @@ input.cb {
 }
 
 .sub { display: block; font-size: 10.5px; }
+.sub.inline { display: inline; font-size: inherit; margin-left: 4px; }
 .pos { color: var(--ts-green); }
 .neg { color: var(--ts-red); }
 
@@ -307,7 +313,7 @@ tr.spot .pill {
 }
 
 // Skeleton rows
-tr.skel td { color: transparent; height: 31px; }
+tr.skel td { color: transparent; height: $row-h; }
 tr.skel td::after {
   content: '';
   position: absolute;

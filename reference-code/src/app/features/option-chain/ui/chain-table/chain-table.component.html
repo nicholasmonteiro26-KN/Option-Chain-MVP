@@ -123,7 +123,10 @@
       </span>
     }
     {{ c.text }}
-    @if (c.sub) { <span [class]="'sub ' + c.sub.cls">{{ c.sub.text }}</span> }
+    @if (c.sub) {
+      @if (c.sub.inline) { <span [class]="'sub inline ' + c.sub.cls">({{ c.sub.text }})</span> }
+      @else { <span [class]="'sub ' + c.sub.cls">{{ c.sub.text }}</span> }
+    }
   </td>
 </ng-template>
 

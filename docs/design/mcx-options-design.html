@@ -1,0 +1,169 @@
+<title>MCX Options Design</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; each section pairs the rule in words with a small TradeSmart-style mockup. */
+:root {
+  --bg: #ffffff; --bg2: #f4f6fb; --fg: #0a1222; --muted: #5b6577; --line: #e3e7ef;
+  --blue: #3f71eb; --blue-soft: #e8eefd; --green: #39b00e; --green-soft: #eaf7e4; --red: #e83937; --red-soft: #fdeaea;
+  --amber: #a15c00; --amber-soft: #fff6e6;
+  --font: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0a1222; --bg2: #111c33; --fg: #e8ecf4; --muted: #95a0b5; --line: #22304d;
+  --blue: #7fa2f5; --blue-soft: #1b2a4d; --green: #5bd02d; --green-soft: #15301a; --red: #ff6b69; --red-soft: #3a1a1d;
+  --amber: #f0b45a; --amber-soft: #33270f; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0a1222; --bg2: #111c33; --fg: #e8ecf4; --muted: #95a0b5; --line: #22304d;
+  --blue: #7fa2f5; --blue-soft: #1b2a4d; --green: #5bd02d; --green-soft: #15301a; --red: #ff6b69; --red-soft: #3a1a1d;
+  --amber: #f0b45a; --amber-soft: #33270f; color-scheme: dark; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--font); }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header { display: grid; gap: 10px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.status { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12.5px; }
+.chip { padding: 2px 10px; border-radius: 999px; background: var(--bg2); color: var(--muted); font-weight: 500; }
+.chip.draft { background: var(--amber-soft); color: var(--amber); }
+h1 { margin: 0; font-size: 30px; line-height: 1.2; text-wrap: balance; }
+.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+h2 { margin: 0 0 10px; font-size: 19px; text-wrap: balance; }
+section { display: grid; gap: 14px; padding-block: 28px; border-bottom: 1px solid var(--line); }
+section > p, li { max-width: 68ch; }
+p { margin: 0; }
+ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+.tbl { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 500; }
+td.k { font-family: var(--mono); color: var(--blue); white-space: nowrap; }
+/* Mockups: small slices of the real screens, in TradeSmart's palette. */
+.mock { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow-x: auto; font-size: 13px; }
+.mock-cap { font-size: 12px; color: var(--muted); }
+.res { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 12px; min-width: 420px; }
+.res + .res { border-top: 1px solid var(--line); }
+.res.hi { background: var(--blue-soft); }
+.res .nm { display: flex; gap: 8px; align-items: baseline; }
+.res small { color: var(--muted); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 12px; min-width: 520px; }
+.bar b { font-size: 14px; }
+.tag { font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+.px { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.up { color: var(--green); } .dn { color: var(--red); }
+.strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); min-width: 520px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.exp { padding: 3px 10px; border-radius: 6px; font-weight: 500; }
+.exp.on { color: var(--blue); background: var(--blue-soft); box-shadow: inset 0 0 0 1px var(--blue); font-weight: 600; }
+.sel { border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; color: var(--muted); }
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.step { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
+.step .api { font-family: var(--mono); font-size: 12.5px; color: var(--blue); }
+.step span { font-size: 13px; color: var(--muted); }
+.pop { min-width: 520px; }
+.pop .row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.bs { min-width: 24px; text-align: center; border-radius: 4px; color: #fff; font-weight: 700; font-size: 12px; padding: 2px 0; }
+.bs.b { background: var(--blue); } .bs.s { background: var(--red); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; font-size: 12px; }
+.seg span { padding: 2px 8px; }
+.seg .on { background: var(--blue); color: #fff; font-weight: 600; }
+.seg .off { color: var(--muted); opacity: 0.55; }
+.act { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.note { color: var(--amber); font-size: 12.5px; }
+.btn { margin-left: auto; padding: 5px 12px; border-radius: 4px; border: 1px solid var(--line); }
+.btn.go { background: var(--blue); color: #fff; border-color: var(--blue); opacity: 0.45; }
+.qs { counter-reset: q; list-style: none; padding: 0; display: grid; gap: 10px; }
+.qs li { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: baseline; }
+.qs li::before { counter-increment: q; content: counter(q); font-family: var(--mono); font-weight: 500; color: var(--blue);
+  background: var(--blue-soft); border-radius: 4px; padding: 0 7px; }
+.block { color: var(--red); font-weight: 500; font-size: 12.5px; }
+footer { padding-top: 24px; color: var(--muted); font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="status"><span class="chip draft">Draft for review</span><span class="chip">13 Nov 2026</span><span class="chip">Option chain · TradeSmart</span></div>
+    <h1>MCX options in the option chain</h1>
+    <p class="lede">A client searches a commodity such as Crude Oil or Gold and opens its MCX option chain, with the same columns, analytics and strategy pop-up as NIFTY, using only the Kambala API.</p>
+  </header>
+
+  <section>
+    <h2>Decisions</h2>
+    <div class="tbl"><table>
+      <tr><th>#</th><th>Decision</th></tr>
+      <tr><td class="k">M1</td><td>Search finds <b>all</b> MCX commodities with options. No MCX quick buttons.</td></tr>
+      <tr><td class="k">M2</td><td>Each expiry is priced off <b>the future it settles on</b> (December options use the December future). The header price, ATM line, IV and Greeks change with the expiry.</td></tr>
+      <tr><td class="k">M3</td><td>Build your strategy: legs can be built, priced, margined and saved to basket. <b>Execute all is off</b> until Kambala confirms how MCX quantity is sent. One setting turns it on.</td></tr>
+      <tr><td class="k">M4</td><td>MCX market orders are off (they need a protection %), as on SENSEX.</td></tr>
+      <tr><td class="k">M5</td><td>Market hours 09:00–23:30 IST, 23:55 while the US is on daylight saving time. Already built: the feed dot follows them.</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>1. Search</h2>
+    <p>Search also asks Kambala for MCX matches and shows each commodity once, after NSE and BSE results. A commodity with no options says so instead of opening an empty chain.</p>
+    <div class="mock" role="img" aria-label="Search results for CRU: Crude Oil on MCX">
+      <div class="res"><span class="nm"><b>CRUDEOIL</b><small>Crude Oil</small></span><small>Commodity · MCX</small></div>
+      <div class="res hi"><span class="nm"><b>CRUDEOILM</b><small>Crude Oil Mini</small></span><small>Commodity · MCX</small></div>
+    </div>
+    <p class="mock-cap">Search "CRU". A direct link works too: <code>?underlying=MCX:CRUDEOIL</code>.</p>
+  </section>
+
+  <section>
+    <h2>2. The chain follows the expiry's future</h2>
+    <p>MCX options trade on futures, so there is no spot price. Each option expiry is matched to the future it settles on, and that future's price drives the chain.</p>
+    <div class="mock" role="img" aria-label="Chain header for CRUDEOIL with the December future selected">
+      <div class="bar"><b>CRUDEOIL</b><span class="tag">MCX</span><span class="mono">DEC FUT</span><span class="px">5,412.00</span><span class="up">+64.00 (+1.20%)</span><span style="color:var(--muted)">L 5,331 · H 5,429</span><span>Lot 100</span></div>
+      <div class="strip"><span class="dot" title="Market open"></span><span class="exp on">5d</span><span class="exp">33d</span><span class="exp">61d</span><span class="sel">Next expiry</span><span style="margin-left:auto;color:var(--muted)">Expiry <b style="color:var(--fg)">17 Dec 2026</b></span></div>
+    </div>
+    <p class="mock-cap">Switch to the January expiry and the header shows the January future and its price.</p>
+    <div class="flow">
+      <div class="step"><span class="api">SearchScrip · MCX</span><span>Find the commodity and its nearest future.</span></div>
+      <div class="step"><span class="api">GetLinkedScrips</span><span>Option expiries and futures for the commodity.</span></div>
+      <div class="step"><span class="api">GetUnderlyingExchToken</span><span>Exact future for each expiry (fallback: first future on or after it).</span></div>
+      <div class="step"><span class="api">GetOptionChain · MCX</span><span>Strikes around the future's price, then live prices on the socket.</span></div>
+    </div>
+    <ul>
+      <li>Columns and tabs stay the same. Lot size, tick and price precision come from each contract.</li>
+      <li>OI and volume are much smaller on MCX, so the "(In Lacs)" scaling will be checked against real numbers and may switch to plain numbers for MCX.</li>
+      <li>IV and Greeks use the same maths, with the future as the forward.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>3. Build your strategy on MCX</h2>
+    <p>Everything works except sending orders, until Kambala confirms whether MCX quantity is sent in lots or units. Getting this wrong could send a far larger order than intended.</p>
+    <div class="mock pop" role="img" aria-label="Strategy pop-up with two MCX legs and Execute all turned off">
+      <div class="act" style="border-top:0"><b>Your strategy · CRUDEOIL</b><span style="color:var(--muted)">2 legs</span></div>
+      <div class="row"><span class="bs b">B</span><span>5400 CE · 17 Dec 2026</span><span class="seg"><span class="on">Limit</span><span class="off">Market</span></span><span class="mono">142.30</span></div>
+      <div class="row"><span class="bs s">S</span><span>5500 CE · 17 Dec 2026</span><span class="seg"><span class="on">Limit</span><span class="off">Market</span></span><span class="mono">96.10</span></div>
+      <div class="act"><span>Margin <b>₹ 41,250</b> <span class="note">to be confirmed</span></span><span class="note">MCX orders are not available yet</span><span class="btn">Save to basket</span><span class="btn go" style="margin-left:0">Execute all</span></div>
+    </div>
+    <ul>
+      <li>Market is off on MCX legs, with the reason on hover.</li>
+      <li>Margin carries a "to be confirmed" note, since it uses the same quantity.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>4. Demo mode</h2>
+    <p>The simulated market gains CRUDEOIL, NATURALGAS, GOLD and SILVER with monthly futures and options, so the whole flow can be tried with <code>?feed=mock</code> and no login.</p>
+  </section>
+
+  <section>
+    <h2>5. Questions for Kambala / TradeSmart</h2>
+    <ol class="qs">
+      <li><span>Is MCX order and margin quantity sent in <b>lots or units</b>? <span class="block">Needed before Execute all can be turned on.</span></span></li>
+      <li><span>Does <code>SearchScrip</code> mark options vs futures (<code>instname</code>: OPTFUT / FUTCOM), so commodities without options can be left out of search?</span></li>
+      <li><span>What protection % should MCX market orders use?</span></li>
+      <li><span>Is <code>GetUnderlyingExchToken</code> available on the v2 API for MCX options?</span></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Not in this piece</h2>
+    <p>Currency options (CDS), MCX quick buttons, placing MCX orders (until question 1 is answered), MCX holiday calendar.</p>
+  </section>
+
+  <footer>Source: <code>docs/superpowers/specs/2026-11-13-mcx-options-design.md</code> in the Option-Chain-MVP repository.</footer>
+</div>

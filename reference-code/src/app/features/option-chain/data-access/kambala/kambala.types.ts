@@ -138,6 +138,18 @@ export interface OrderLeg {
   prd: 'I' | 'M';
 }
 
+/** The fields of a SingleOrdHist row (newest first) or a WS `om` order update the option chain reads. */
+export interface OrderStatusRow {
+  norenordno?: string;
+  /** e.g. OPEN, PENDING, TRIGGER_PENDING, COMPLETE, REJECTED, CANCELED (WS: New, Replaced, Complete, Rejected…). */
+  status?: string;
+  qty?: string;
+  fillshares?: string;
+  avgprc?: string;
+  rejreason?: string;
+  cancelqty?: string;
+}
+
 /** One GetIndexList row: index name and the token used to subscribe. */
 export interface IndexListEntry {
   idxname: string;

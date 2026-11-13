@@ -39,7 +39,7 @@ export class StatusBannerComponent {
       case 'reconnecting':
         return { tone: 'warn', role: 'status', text: 'Reconnecting to live prices… Showing the last values received.' };
       case 'closed':
-        return { tone: 'info', role: 'status', text: 'Market closed · Showing prices as of 15:30.' };
+        return { tone: 'info', role: 'status', text: 'Market closed.' };
       case 'error':
         return {
           tone: 'err', role: 'alert',

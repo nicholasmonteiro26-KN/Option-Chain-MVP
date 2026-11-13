@@ -1,7 +1,7 @@
 import type { KambalaRestApi } from '../kambala/kambala-rest.client';
 import { KambalaError } from '../kambala/kambala.types';
 import type {
-  IndexListEntry, LinkedScripsResponse, OptionChainRow, OrderLeg, ScripSearchResult,
+  IndexListEntry, LinkedScripsResponse, OptionChainRow, OrderLeg, OrderStatusRow, ScripSearchResult,
 } from '../kambala/kambala.types';
 import { QUICK_UNDERLYINGS } from '../models';
 import type { MockMarket } from './mock-market';
@@ -12,6 +12,8 @@ const MOCK_FREEZE_QTY = 1800;
 /** Same public API as `KambalaRestClient`, answered from a `MockMarket` (for `?feed=mock`). */
 export class MockKambalaRestClient implements KambalaRestApi {
   private orderSeq = 0;
+  /** Mock orders: a market order fills at once; a limit order is open on the first status check, filled after. */
+  private readonly orders = new Map<string, { leg: OrderLeg; checks: number; cancelled: boolean }>();
 
   constructor(private readonly market: MockMarket) {}
 
@@ -44,7 +46,27 @@ export class MockKambalaRestClient implements KambalaRestApi {
 
   placeOrder(leg: OrderLeg): Promise<string> {
     if (leg.qty > MOCK_FREEZE_QTY) return Promise.reject(new KambalaError('Quantity exceeds freeze limit'));
-    return Promise.resolve(`MOCK${String(++this.orderSeq).padStart(6, '0')}`);
+    const no = `MOCK${String(++this.orderSeq).padStart(6, '0')}`;
+    this.orders.set(no, { leg, checks: 0, cancelled: false });
+    return Promise.resolve(no);
+  }
+
+  orderStatus(norenordno: string): Promise<OrderStatusRow> {
+    const o = this.orders.get(norenordno);
+    if (!o) return Promise.reject(new KambalaError('Order not found'));
+    o.checks++;
+    const qty = String(o.leg.qty);
+    if (o.cancelled) return Promise.resolve({ norenordno, status: 'CANCELED', qty, fillshares: '0', cancelqty: qty });
+    if (o.leg.prctyp === 'LMT' && o.checks < 2) return Promise.resolve({ norenordno, status: 'OPEN', qty, fillshares: '0' });
+    return Promise.resolve({ norenordno, status: 'COMPLETE', qty, fillshares: qty, avgprc: o.leg.prc.toFixed(2) });
+  }
+
+  cancelOrder(norenordno: string): Promise<void> {
+    const o = this.orders.get(norenordno);
+    if (!o) return Promise.reject(new KambalaError('Order not found to cancel'));
+    if (o.leg.prctyp === 'LMT' && o.checks < 2) o.cancelled = true;
+    else return Promise.reject(new KambalaError('Order is already complete'));
+    return Promise.resolve();
   }
 
   /** The quick underlyings' built-in tokens, named as Kambala names them ("Nifty 50", "SENSEX"). */

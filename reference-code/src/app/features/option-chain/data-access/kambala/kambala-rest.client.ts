@@ -2,7 +2,7 @@ import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http
 import { inject, Injectable, InjectionToken } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import {
-  IndexListEntry, KambalaError, LinkedScripsResponse, NOREN_SESSION_CONFIG, OptionChainRow, OrderLeg, ScripSearchResult,
+  IndexListEntry, KambalaError, LinkedScripsResponse, NOREN_SESSION_CONFIG, OptionChainRow, OrderLeg, OrderStatusRow, ScripSearchResult,
   SessionExpiredError, UserDetailsResult,
 } from './kambala.types';
 // Shared with the dev-server proxy, so both send the same bytes (raw JSON, & % + as unicode escapes).
@@ -22,6 +22,7 @@ interface KambalaEnvelope {
 
 /** The REST surface the feature uses (the mock client implements exactly this). */
 export type KambalaRestApi = Pick<KambalaRestClient, 'getLinkedScrips' | 'getOptionChain' | 'searchScrip' | 'getIndexList' | 'getBasketMargin' | 'placeOrder'
+  | 'orderStatus' | 'cancelOrder'
 >;
 
 /** An order leg as Kambala wants it: every value a string. */
@@ -106,6 +107,21 @@ export class KambalaRestClient {
       remarks: 'OC-STRATEGY',
     });
     return res.norenordno;
+  }
+
+  /** SingleOrdHist: the order's latest state (the first row; the history is newest first). */
+  // INTEGRATION: confirm the path on TradeSmart's v2 base (the Kambala doc lists /NorenWClientTP/SingleOrdHist).
+  async orderStatus(norenordno: string): Promise<OrderStatusRow> {
+    const res = await this.call<OrderStatusRow[] | { values?: OrderStatusRow[] }>('SingleOrdHist', { norenordno });
+    const rows = Array.isArray(res) ? res : (res.values ?? []);
+    if (!rows[0]) throw new KambalaError('Order status not available');
+    return rows[0];
+  }
+
+  /** CancelOrder: cancels an open order (the rest of it, if partly filled). A refusal throws `KambalaError(emsg)`. */
+  // INTEGRATION: confirm the path on TradeSmart's v2 base (the Kambala doc lists /NorenWClientTP/CancelOrder).
+  async cancelOrder(norenordno: string): Promise<void> {
+    await this.call<{ result?: string }>('CancelOrder', { norenordno });
   }
 
   /**
