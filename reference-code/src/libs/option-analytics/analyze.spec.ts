@@ -155,6 +155,34 @@ describe('illiquid leg', () => {
   });
 });
 
+describe('market closed (holiday / weekend)', () => {
+  /** A closed day as Kambala sends it: no bid/ask, volume 0, the LTP is the last session's price. */
+  const closedDay = (marketClosed: boolean): ChainInput => {
+    const input = sampleChain();
+    const strip = (q: LegQuote | null): LegQuote | null =>
+      q && { ...q, bid: null, ask: null, bidQty: 0, askQty: 0, volume: 0 };
+    return { ...input, marketClosed, strikes: input.strikes.map((s) => ({ ...s, ce: strip(s.ce), pe: strip(s.pe) })) };
+  };
+
+  it('IV, Greeks, ATM IV and GEX come from the last traded prices instead of going blank', () => {
+    const open = analyzeChain(closedDay(false));
+    expect(open.atmIv).toBeNull(); // the old behaviour: nothing to work from
+    expect(leg(open, 'CE25000').iv).toBeNull();
+
+    const res = analyzeChain(closedDay(true));
+    const l = leg(res, 'CE25000');
+    expect(l.iv).not.toBeNull();
+    expect(l.ivSource).toBe('LTP');
+    expect(l.delta).not.toBeNull();
+    expect(l.itmProb).not.toBeNull();
+    expect(res.atmIv).not.toBeNull();
+    expect(res.forwardSource).toBe('PARITY_LTP');
+    expect(row(res, 25000).avgIv).not.toBeNull();
+    expect(row(res, 25000).gexOiCr).not.toBe(0);
+    expect(badNumbers(res)).toEqual([]);
+  });
+});
+
 describe('expired chain', () => {
   it('expired chain yields EXPIRED status, no NaN', () => {
     const input = sampleChain({ nowMs: Date.parse('2026-11-03T15:29:30+05:30') });

@@ -52,6 +52,18 @@ describe('estimateForward', () => {
     expect(res.source).toBe('PARITY_LTP');
     close(res.forward, F25100);
   });
+  it('market closed: PARITY_LTP from last traded prices even with no trades today', () => {
+    const mk = (k: number, c: number, p: number): StrikeQuotes => ({
+      strike: k,
+      ce: { ...leg('CE', k, c, c, 0), bid: null, ask: null },
+      pe: { ...leg('PE', k, p, p, 0), bid: null, ask: null },
+    });
+    const strikes = [mk(24900, 225, 120), mk(25000, 160, 155.5), mk(25100, 108, 203)];
+    expect(estimateForward({ ...base, strikes }).source).toBe('SPOT_CARRY'); // open: needs a trade today
+    const res = estimateForward({ ...base, strikes, marketClosed: true });
+    expect(res.source).toBe('PARITY_LTP');
+    close(res.forward, F25100);
+  });
   it('futures outside 3% is ignored', () => {
     expect(estimateForward({ ...base, strikes: [], futuresPrice: 30000 }).source).toBe('SPOT_CARRY');
   });

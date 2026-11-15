@@ -5,7 +5,7 @@ import { sampleChain, SAMPLE_LOT, SAMPLE_SPOT, sampleToken } from '@option-analy
 import { ChainMeta, ContractRef, QUICK_UNDERLYINGS } from '../../data-access/models';
 import { buildViewModel, ChainViewModel } from '../../view/chain-view-model';
 import { GEX_TITLE } from '../../columns/column-registry';
-import { ChainTableComponent, ContractActionEvent, MORE_MENU, TradeEvent } from './chain-table.component';
+import { ChainTableComponent, ContractActionEvent, LAST_SESSION_TITLE, MORE_MENU, TradeEvent } from './chain-table.component';
 
 type Patch = { strike: number; type: OptType; patch: Partial<LegQuote> };
 
@@ -256,6 +256,21 @@ describe('ChainTableComponent mirrored', () => {
     expect(low.getAttribute('title')).toBe('Low confidence: price within a few ticks, or under 1 hour to expiry');
     const ok = tds(strikeRow(f, 25000))[0]!;
     expect(ok.classList.contains('low-conf')).toBe(false);
+  });
+
+  it("an IV from the last session's price (no trade today, market closed) says so on hover", () => {
+    const vm = makeVm('greeks');
+    const patched: ChainViewModel = {
+      ...vm,
+      rows: vm.rows.map((r) => (r.strike === 25000 && r.pe?.a && r.pe.quote
+        ? { ...r, pe: { ...r.pe, quote: { ...r.pe.quote, volume: 0 }, a: { ...r.pe.a, ivSource: 'LTP' as const, lowConfidence: false } } }
+        : r)),
+    };
+    const f = setup(patched);
+    const pe = tds(strikeRow(f, 25000)).at(-1)!; // greeks: PE IV is the last cell
+    expect(val(pe)).not.toBe('–');
+    expect(pe.getAttribute('title')).toBe(LAST_SESSION_TITLE);
+    expect(LAST_SESSION_TITLE).toBe("From the last session's price (market closed)");
   });
 
   it('dims the cells of a stale leg only', () => {

@@ -91,6 +91,14 @@ describe('selectPrice', () => {
   it('zero quantity invalidates mid', () => {
     expect(selectPrice(quote({ bidQty: 0, volume: 5 }))?.source).toBe('LTP');
   });
+  it('market closed (holiday, weekend): the last traded price counts even with no trades today', () => {
+    // A closed day: no quotes, Kambala reports volume 0, the LTP is the last session's.
+    const closedDay = quote({ bid: 0, ask: 0, volume: 0 });
+    expect(selectPrice(closedDay)).toBeNull(); // market open: still needs a trade today
+    expect(selectPrice(closedDay, true)).toEqual({ price: 100, source: 'LTP' });
+    expect(selectPrice(quote({ bid: 0, ask: 0, volume: 0, ltp: 0 }), true)).toBeNull();
+    expect(selectPrice(quote({ bid: 0, ask: 0, volume: 0, ltp: null }), true)).toBeNull();
+  });
 });
 
 describe('isLowConfidence', () => {

@@ -15,8 +15,11 @@ function median(xs: number[]): number {
 export function estimateForward(args: {
   spot: number; futuresPrice: number | null; strikes: StrikeQuotes[]; T: number; r: number;
   prevForward: number | null; eachSide: number;
+  /** Market closed: last traded prices count without a trade today (see `selectPrice`). */
+  marketClosed?: boolean;
 }): { forward: number; source: ForwardSource } {
   const { spot, futuresPrice, T, r, prevForward, eachSide } = args;
+  const closed = args.marketClosed ?? false;
   const carry = Math.exp(r * T);
   const sane = (f: number) => Number.isFinite(f) && f > 0 && Math.abs(f / spot - 1) <= MAX_DEV;
 
@@ -39,7 +42,7 @@ export function estimateForward(args: {
   };
 
   const mid = (q: LegQuote) => { const p = selectPrice(q); return p && p.source === 'MID' ? p.price : null; };
-  const ltp = (q: LegQuote) => (q.volume > 0 && q.ltp !== null && q.ltp > 0 ? q.ltp : null);
+  const ltp = (q: LegQuote) => ((q.volume > 0 || closed) && q.ltp !== null && q.ltp > 0 ? q.ltp : null);
 
   const fMid = parity(mid);
   if (fMid !== null && sane(fMid)) return { forward: fMid, source: 'PARITY_MID' };

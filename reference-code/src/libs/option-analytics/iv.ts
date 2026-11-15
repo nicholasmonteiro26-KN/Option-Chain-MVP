@@ -7,14 +7,18 @@ const SIGMA_MAX = 5.0;
 const MAX_ITER = 100;
 const EPS_INTRINSIC = 1e-9;
 
-/** Mid if the quote is valid, else LTP when traded today, else null (§2.5). */
-export function selectPrice(q: LegQuote): { price: number; source: 'MID' | 'LTP' } | null {
+/**
+ * Mid if the quote is valid, else LTP when traded today, else null (§2.5). While the market is closed (holiday,
+ * weekend, after hours) there are no quotes and Kambala reports volume 0, so the last traded price (the last
+ * session's) is used whatever today's volume.
+ */
+export function selectPrice(q: LegQuote, marketClosed = false): { price: number; source: 'MID' | 'LTP' } | null {
   const { bid, ask } = q;
   if (bid !== null && ask !== null && bid > 0 && ask > 0 && ask >= bid && q.bidQty > 0 && q.askQty > 0) {
     const mid = (bid + ask) / 2;
     if (ask - bid <= Math.max(5 * q.tickSize, 0.1 * mid)) return { price: mid, source: 'MID' };
   }
-  if (q.volume > 0 && q.ltp !== null && q.ltp > 0) return { price: q.ltp, source: 'LTP' };
+  if ((q.volume > 0 || marketClosed) && q.ltp !== null && q.ltp > 0) return { price: q.ltp, source: 'LTP' };
   return null;
 }
 

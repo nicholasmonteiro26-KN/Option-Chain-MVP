@@ -10,6 +10,8 @@ import type { ForwardSource, IvStatus, LegQuote, OiSense, StrikeQuotes } from '.
 export interface ChainInput {
   spot: number; futuresPrice: number | null; strikes: StrikeQuotes[]; expiryIso: string; nowMs: number;
   prevForward: number | null; prevIv: Record<string, number>; config: OptionChainConfig;
+  /** The market is closed: IV and the forward may use last traded prices with no trade today (holidays, weekends). */
+  marketClosed?: boolean;
 }
 export interface LegAnalytics {
   token: string; iv: number | null; ivStatus: IvStatus; ivSource: 'MID' | 'LTP' | null; lowConfidence: boolean;
@@ -60,7 +62,7 @@ export function analyzeChain(input: ChainInput): ChainAnalytics {
     ? { forward: spot, source: 'SPOT_CARRY' as const }
     : estimateForward({
       spot, futuresPrice: input.futuresPrice, strikes: sorted, T, r,
-      prevForward: input.prevForward, eachSide: config.forwardStrikesEachSide,
+      prevForward: input.prevForward, eachSide: config.forwardStrikesEachSide, marketClosed: input.marketClosed,
     });
 
   // OI and volume are always quantity here: the store normalises `oiUnit: 'lots'` at ingestion (one source of units).
@@ -71,7 +73,7 @@ export function analyzeChain(input: ChainInput): ChainAnalytics {
   const solve = (q: LegQuote | null): IvResult | null => {
     if (!q) return null;
     if (expired) return EXPIRED_IV;
-    const sel = selectPrice(q);
+    const sel = selectPrice(q, input.marketClosed);
     if (!sel) return { iv: null, status: 'NO_PRICE', source: null, lowConfidence: false };
     const res = solveIv(q.type, sel.price, F, q.strike, T, r, input.prevIv[q.token]);
     const lowConfidence = isLowConfidence(sel.price, q.tickSize) || (nearExpiry && res.iv !== null);

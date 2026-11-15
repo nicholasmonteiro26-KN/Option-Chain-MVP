@@ -184,6 +184,8 @@ export class AnalyticsBridge implements OnDestroy {
       input: {
         spot, futuresPrice: null, strikes, expiryIso: expiry.iso, nowMs: this.clock(),
         prevForward: warm?.forward ?? null, prevIv, config: this.config,
+        // Closed (holiday, weekend, after hours): IV may use last traded prices, so the Greeks are not blank.
+        marketClosed: !this.session.isOpen(),
       },
     };
   }

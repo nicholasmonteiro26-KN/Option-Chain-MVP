@@ -47,6 +47,9 @@ const SIGNED = new Set(['chg', 'chgPct', 'ltpChgPct', 'oiChg', 'oiChgPct', 'strD
 const SENSE_CLASS: Record<string, string> = {
   LONG_BUILD_UP: 's-lb', SHORT_BUILD_UP: 's-sb', SHORT_COVERING: 's-sc', LONG_UNWINDING: 's-lu',
 };
+/** IV cell hover when it comes from the last traded price of an earlier session (market closed). */
+export const LAST_SESSION_TITLE = "From the last session's price (market closed)";
+
 const IV_REASON: Partial<Record<IvStatus, string>> = {
   NO_PRICE: 'No two-sided quote and no trades today',
   BELOW_INTRINSIC: 'Price is below intrinsic value',
@@ -234,6 +237,8 @@ export class ChainTableComponent {
     if (col.id === 'iv' && leg?.a) {
       if (v === null) title = IV_REASON[leg.a.ivStatus] ?? null;
       else if (leg.a.lowConfidence) title = LOW_CONF_TITLE;
+      // No trade today (market closed): the IV is from the last session's price.
+      else if (leg.a.ivSource === 'LTP' && leg.quote && leg.quote.volume === 0) title = LAST_SESSION_TITLE;
       if (leg.a.lowConfidence) cls.push('low-conf');
     }
     let sub: CellVM['sub'] = null;
